@@ -187,19 +187,6 @@ class Customer extends Model
     }
 
     /**
-     * Find and lock the run of the given workflow that an engine report is about. The
-     * engine can report before the start job has stored the process id, so a report is
-     * also matched by the run id the process was started with.
-     */
-    public function lockRunForReport(string $workflow, string $processInstanceId, ?int $runId): ?WorkflowInstance
-    {
-        $runs = $this->workflows()->where('workflow', $workflow)->lockForUpdate();
-
-        return (clone $runs)->where('external_id', $processInstanceId)->first()
-            ?? ($runId === null ? null : (clone $runs)->whereKey($runId)->whereNull('external_id')->first());
-    }
-
-    /**
      * @return MorphOne<WorkflowInstance, $this>
      */
     private function latestRunOf(string $workflow): MorphOne

@@ -30,6 +30,22 @@
         rejected: 'bg-red-50 text-red-700 ring-red-200',
     };
 
+    // Verification's state machine has a place per review step; the list shows them as one badge, with the step underneath.
+    const verificationLabels = {
+        contact_review: { badge: 'flagged', awaitingReview: 'contact' },
+        address_review: { badge: 'flagged', awaitingReview: 'address' },
+        address_check: { badge: 'running' },
+    };
+
+    // Checks that ran without a person show who did them, instead of "an unknown user".
+    const automaticActors = {
+        scored: 'automatic financial scoring',
+        flagged: 'automatic verification',
+        verified: 'automatic verification',
+        approved: 'automatic verification',
+        rejected: 'automatic verification',
+    };
+
     // Server-rendered timestamps are shown in UTC, then switch to the visitor's locale and time zone once mounted.
     let mounted = $state(false);
 
@@ -96,38 +112,44 @@
                             <td class="px-4 py-3">{customer.city}, {customer.country}</td>
                             <td class="px-4 py-3">
                                 {#if customer.workflow}
-                                    <span
-                                        class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 {workflowStyles[customer.workflow.status] ??
+                                    {@const verification = verificationLabels[customer.workflow.status] ?? { badge: customer.workflow.status }}
+                                    <!-- The badge opens the verification workflow's diagram, showing where this run is. -->
+                                    <Link
+                                        href={`/workflows/customer-verification?run=${customer.workflow.id}`}
+                                        class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 hover:underline {workflowStyles[verification.badge] ??
                                             'bg-slate-50 text-slate-700 ring-slate-200'}"
                                     >
-                                        {customer.workflow.status}
-                                    </span>
-                                    {#if customer.workflow.status === 'flagged'}
-                                        <span class="mt-1 block text-xs text-slate-500">at {customer.workflow.result?.failed_step} check · awaiting review</span>
-                                    {:else if customer.workflow.status === 'running' && customer.workflow.result?.reviews?.length}
+                                        {verification.badge}
+                                    </Link>
+                                    {#if verification.awaitingReview}
+                                        <span class="mt-1 block text-xs text-slate-500">at {verification.awaitingReview} check · awaiting review</span>
+                                    {:else if customer.workflow.status === 'address_check'}
                                         {@const lastReview = customer.workflow.result.reviews.at(-1)}
                                         <span class="mt-1 block text-xs text-slate-500">{lastReview.step} match {lastReview.decision} · finishing check</span>
                                     {:else if customer.workflow.result?.failed_step}
                                         <span class="mt-1 block text-xs text-slate-500">at {customer.workflow.result.failed_step} check</span>
-                                    {:else if customer.workflow.current_task}
-                                        <span class="mt-1 block text-xs text-slate-500">{customer.workflow.current_task}</span>
                                     {/if}
                                 {:else}
                                     <span class="text-slate-400">—</span>
                                 {/if}
                             </td>
                             <td class="px-4 py-3 whitespace-nowrap">
+                                <!-- The badge opens the scoring workflow's diagram, showing where this run is. -->
                                 {#if customer.scoring?.status === 'scored'}
-                                    <span
-                                        class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 {riskBandStyles[customer.scoring.result.risk_band]}"
+                                    <Link
+                                        href={`/workflows/financial-scoring?run=${customer.scoring.id}`}
+                                        class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 hover:underline {riskBandStyles[customer.scoring.result.risk_band]}"
                                         title={[`Financial score ${customer.scoring.result.score}, ${customer.scoring.result.risk_band} risk`, ...customer.scoring.result.reasons].join('\n')}
                                     >
                                         {customer.scoring.result.score} · {customer.scoring.result.risk_band}
-                                    </span>
+                                    </Link>
                                 {:else if customer.scoring}
-                                    <span class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 {workflowStyles[customer.scoring.status] ?? workflowStyles.pending}">
+                                    <Link
+                                        href={`/workflows/financial-scoring?run=${customer.scoring.id}`}
+                                        class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 hover:underline {workflowStyles[customer.scoring.status] ?? workflowStyles.pending}"
+                                    >
                                         {customer.scoring.status}
-                                    </span>
+                                    </Link>
                                 {:else}
                                     <span class="text-slate-400" title="No financials captured yet">—</span>
                                 {/if}
@@ -175,7 +197,7 @@
                                 <time datetime={entry.created_at} class="text-slate-500">{formatTimestamp(entry.created_at)}</time>
                             </div>
                             <p class="mt-1 text-xs text-slate-500">
-                                By {entry.user?.name ?? 'an unknown user'}{entry.ip_address ? ` from ${entry.ip_address}` : ''}
+                                By {entry.user?.name ?? automaticActors[entry.event] ?? 'an unknown user'}{entry.ip_address ? ` from ${entry.ip_address}` : ''}
                             </p>
 
                             <dl class="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">

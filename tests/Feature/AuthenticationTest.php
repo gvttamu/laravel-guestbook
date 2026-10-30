@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Customer;
 use App\Models\FormDraft;
 use App\Models\User;
+use App\Models\WorkflowInstance;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -103,8 +104,12 @@ class AuthenticationTest extends TestCase
     {
         $this->actingAs(User::factory()->create());
 
+        $run = Customer::factory()->create()->workflows()->create(['workflow' => WorkflowInstance::CUSTOMER_VERIFICATION, 'status' => 'contact_review']);
+
         $this->get('/compliance/reviews')->assertForbidden();
-        $this->post('/compliance/reviews/task-1', ['decision' => 'approved'])->assertForbidden();
+        $this->get("/compliance/reviews/{$run->id}")->assertForbidden();
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved'])->assertForbidden();
+        $this->assertSame('contact_review', $run->refresh()->status);
     }
 
     public function test_compliance_officers_cannot_list_capture_or_edit_customers(): void

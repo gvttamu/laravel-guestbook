@@ -20,5 +20,8 @@
     },
     "optionalDependencies": {
         "@laravel/multiplex": "^0.4.1"
+    },
+    "dependencies": {
+        "mermaid": "^12.2.0"
     }
 }

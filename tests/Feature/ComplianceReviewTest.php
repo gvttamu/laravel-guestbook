@@ -2,13 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\RunVerificationChecks;
 use App\Models\Customer;
 use App\Models\User;
 use App\Models\WorkflowInstance;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\Request;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -16,269 +15,191 @@ class ComplianceReviewTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    private const FLOWABLE = 'http://flowable.test/process-api';
+    private const PHONE_MATCH = 'Phone number +1 555 010 0666 is on the Demo sanctions list';
 
-    protected function setUp(): void
-    {
-        parent::setUp();
+    private const ADDRESS_MATCH = 'Address 666 Shadow Lane, 66666, United States is on the Demo sanctions list';
 
-        config(['services.flowable.url' => self::FLOWABLE]);
-    }
-
-    public function test_lists_open_review_tasks_with_the_flagged_customer(): void
+    public function test_lists_runs_awaiting_review_longest_waiting_first_with_the_flagged_customer(): void
     {
         $this->actingAs(User::factory()->complianceOfficer()->create());
-        $workflow = $this->flaggedWorkflow(['first_name' => 'Pete']);
-        Http::fake([self::FLOWABLE.'/runtime/tasks*' => Http::response(['data' => [
-            $this->task('task-1', $workflow->external_id),
-            $this->task('task-for-an-unknown-process', 'process-unknown'),
-        ]])]);
+        $address = $this->flaggedRun('address', ['first_name' => 'Grace'], flaggedAt: '2026-10-29T09:00:00+00:00');
+        $contact = $this->flaggedRun('contact', ['first_name' => 'Ada', 'email' => 'ada@example.com'], flaggedAt: '2026-10-28T21:00:00+00:00');
+        Customer::factory()->create()->workflows()->create(['workflow' => WorkflowInstance::CUSTOMER_VERIFICATION, 'status' => 'verified']);
 
         $this->get('/compliance/reviews')
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('compliance/Reviews')
-                ->where('engineAvailable', true)
-                ->has('reviews', 1)
-                ->where('reviews.0.id', 'task-1')
-                ->where('reviews.0.customer.first_name', 'Pete')
+                ->has('reviews', 2)
+                ->where('reviews.0.id', $contact->id)
                 ->where('reviews.0.failed_step', 'contact')
-                ->where('reviews.0.matches', ['Phone number +1 555 010 0666 is on the Demo sanctions list'])
+                ->where('reviews.0.matches', [self::PHONE_MATCH])
+                ->where('reviews.0.flagged_at', '2026-10-28T21:00:00+00:00')
+                ->where('reviews.0.customer.email', 'ada@example.com')
+                ->where('reviews.1.id', $address->id)
+                ->where('reviews.1.failed_step', 'address')
             );
-
-        Http::assertSent(fn (Request $request) => str_contains($request->url(), 'processDefinitionKey=customerVerification')
-            && str_contains($request->url(), 'candidateGroup=compliance'));
     }
 
-    public function test_a_superseded_runs_review_is_not_offered(): void
+    public function test_shows_a_review_with_the_customers_details_but_not_their_finances(): void
     {
         $this->actingAs(User::factory()->complianceOfficer()->create());
-        $workflow = $this->flaggedWorkflow();
-        $workflow->update(['status' => 'superseded']);
-        Http::fake([
-            self::FLOWABLE.'/runtime/tasks/task-1' => Http::response($this->task('task-1', $workflow->external_id)),
-            self::FLOWABLE.'/runtime/tasks*' => Http::response(['data' => [$this->task('task-1', $workflow->external_id)]]),
-        ]);
+        $run = $this->flaggedRun('contact', ['first_name' => 'Ada', 'city' => 'London']);
 
-        $this->get('/compliance/reviews')->assertInertia(fn (Assert $page) => $page->has('reviews', 0));
-        $this->get('/compliance/reviews/task-1')->assertNotFound();
-    }
-
-    public function test_the_list_says_so_when_the_engine_is_unreachable(): void
-    {
-        $this->actingAs(User::factory()->complianceOfficer()->create());
-        Http::fake(fn () => throw new ConnectionException('Connection refused'));
-
-        $this->get('/compliance/reviews')
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page->where('engineAvailable', false)->has('reviews', 0));
-    }
-
-    public function test_shows_a_review_with_the_customers_details(): void
-    {
-        $this->actingAs(User::factory()->complianceOfficer()->create());
-        $workflow = $this->flaggedWorkflow(['first_name' => 'Pete', 'city' => 'Testville']);
-        Http::fake([self::FLOWABLE.'/runtime/tasks/task-1' => Http::response($this->task('task-1', $workflow->external_id))]);
-
-        $this->get('/compliance/reviews/task-1')
+        $this->get("/compliance/reviews/{$run->id}")
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('compliance/Review')
-                ->where('review.id', 'task-1')
-                ->where('review.customer.city', 'Testville')
+                ->where('review.id', $run->id)
                 ->where('review.failed_step', 'contact')
+                ->where('review.customer.first_name', 'Ada')
+                ->where('review.customer.city', 'London')
+                ->missing('review.customer.monthly_income')
+                ->missing('review.customer.loan_amount')
                 ->where('review.earlier_reviews', [])
             );
     }
 
-    public function test_a_finished_or_unrelated_task_is_not_found(): void
+    public function test_a_run_that_is_not_awaiting_review_is_not_found(): void
     {
         $this->actingAs(User::factory()->complianceOfficer()->create());
-        $workflow = $this->flaggedWorkflow();
-        Http::fake([
-            self::FLOWABLE.'/runtime/tasks/finished' => Http::response(['message' => 'Not found'], 404),
-            self::FLOWABLE.'/runtime/tasks/other-task' => Http::response([...$this->task('other-task', $workflow->external_id), 'taskDefinitionKey' => 'somethingElse']),
-        ]);
+        $verified = Customer::factory()->create()->workflows()->create(['workflow' => WorkflowInstance::CUSTOMER_VERIFICATION, 'status' => 'verified']);
 
-        $this->get('/compliance/reviews/finished')->assertNotFound();
-        $this->get('/compliance/reviews/other-task')->assertNotFound();
+        $this->get("/compliance/reviews/{$verified->id}")->assertNotFound();
+        $this->get('/compliance/reviews/999')->assertNotFound();
     }
 
-    public function test_approving_completes_the_task_records_the_decision_and_leaves_the_engine_to_finish(): void
+    public function test_approving_a_contact_match_records_the_review_and_queues_the_address_check(): void
     {
-        $reviewer = User::factory()->complianceOfficer()->create();
-        $this->actingAs($reviewer);
-        $workflow = $this->flaggedWorkflow();
-        $this->fakeTask('task-1', $workflow->external_id);
+        $officer = User::factory()->complianceOfficer()->create();
+        $this->actingAs($officer);
+        Queue::fake([RunVerificationChecks::class]);
+        $run = $this->flaggedRun('contact');
 
-        $this->post('/compliance/reviews/task-1', ['decision' => 'approved', 'notes' => 'Different person, same number'])
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved', 'notes' => 'Different person'])
             ->assertRedirect('/compliance/reviews');
 
-        Http::assertSent(fn (Request $request) => $request->method() === 'POST'
-            && $request->url() === self::FLOWABLE.'/runtime/tasks/task-1'
-            && $request['action'] === 'complete'
-            && $request['variables'] === [
-                ['name' => 'reviewDecision', 'value' => 'approved'],
-                ['name' => 'reviewNotes', 'value' => 'Different person, same number'],
-            ]);
+        $run->refresh();
+        $this->assertSame('address_check', $run->status);
+        $this->assertSame('contact', $run->result['reviews'][0]['step']);
+        $this->assertSame([self::PHONE_MATCH], $run->result['reviews'][0]['matches']);
+        $this->assertSame('approved', $run->result['reviews'][0]['decision']);
+        $this->assertSame('Different person', $run->result['reviews'][0]['notes']);
+        $this->assertSame($officer->id, $run->result['reviews'][0]['reviewed_by']);
+        Queue::assertPushed(RunVerificationChecks::class, fn (RunVerificationChecks $job) => $job->workflowInstance->is($run));
 
-        $workflow->refresh();
-        $this->assertSame('running', $workflow->status);
-        $this->assertSame('contact', $workflow->result['failed_step']);
-        $this->assertCount(1, $workflow->result['reviews']);
-        $this->assertSame('contact', $workflow->result['reviews'][0]['step']);
-        $this->assertSame(['Phone number +1 555 010 0666 is on the Demo sanctions list'], $workflow->result['reviews'][0]['matches']);
-        $this->assertSame('approved', $workflow->result['reviews'][0]['decision']);
-        $this->assertSame('Different person, same number', $workflow->result['reviews'][0]['notes']);
-        $this->assertSame($reviewer->id, $workflow->result['reviews'][0]['reviewed_by']);
-
-        $audit = $workflow->subject->auditLogs()->sole();
+        $audit = $run->subject->auditLogs()->sole();
         $this->assertSame('approved', $audit->event);
-        $this->assertSame(['review_step' => 'contact', 'review_decision' => 'approved', 'review_notes' => 'Different person, same number'], $audit->new_values);
+        $this->assertTrue($audit->user->is($officer));
+        $this->assertSame(['review_step' => 'contact', 'review_decision' => 'approved', 'review_notes' => 'Different person'], $audit->new_values);
     }
 
-    public function test_an_address_review_after_an_approved_contact_review_keeps_both_reviews(): void
+    public function test_an_approved_contact_match_with_a_clear_address_ends_approved(): void
     {
         $this->actingAs(User::factory()->complianceOfficer()->create());
-        $contactReviewer = User::factory()->complianceOfficer()->create(['name' => 'Grace Hopper']);
-        $workflow = $this->flaggedWorkflow();
-        $workflow->update(['result' => [
-            'status' => 'flagged',
-            'failed_step' => 'address',
-            'matches' => ['Address 13 Blackwater Road, EC1A 1BB, United Kingdom is on the Demo sanctions list'],
-            'reviews' => [[
-                'step' => 'contact',
-                'matches' => ['Phone number +1 555 010 0666 is on the Demo sanctions list'],
-                'decision' => 'approved',
-                'notes' => 'Shared number, different person',
-                'reviewed_by' => $contactReviewer->id,
-                'reviewed_at' => '2026-10-29T09:00:00+00:00',
-            ]],
-        ]]);
-        $this->fakeTask('task-2', $workflow->external_id, 'reviewAddress');
+        $run = $this->flaggedRun('contact');
 
-        $this->get('/compliance/reviews/task-2')
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page
-                ->where('review.failed_step', 'address')
-                ->has('review.earlier_reviews', 1)
-                ->where('review.earlier_reviews.0.step', 'contact')
-                ->where('review.earlier_reviews.0.decision', 'approved')
-                ->where('review.earlier_reviews.0.matches', ['Phone number +1 555 010 0666 is on the Demo sanctions list'])
-                ->where('review.earlier_reviews.0.notes', 'Shared number, different person')
-                ->where('review.earlier_reviews.0.reviewed_by', 'Grace Hopper')
-            );
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved']);
 
-        $this->post('/compliance/reviews/task-2', ['decision' => 'rejected', 'notes' => 'Known shell company address'])
-            ->assertRedirect('/compliance/reviews');
-
-        $reviews = $workflow->refresh()->result['reviews'];
-        $this->assertSame(['contact', 'address'], array_column($reviews, 'step'));
-        $this->assertSame(['approved', 'rejected'], array_column($reviews, 'decision'));
-        $this->assertSame('running', $workflow->status);
+        $this->assertSame('approved', $run->refresh()->status);
+        $this->assertSame(['approved', 'approved'], $run->subject->auditLogs()->orderBy('id')->pluck('event')->all());
+        $this->assertNull($run->subject->auditLogs()->orderByDesc('id')->first()->user_id);
     }
 
-    public function test_a_review_left_from_the_old_single_review_process_still_works_and_its_decision_is_final(): void
+    public function test_an_approved_contact_match_goes_on_to_review_a_matching_address_keeping_both_reviews(): void
     {
-        $this->actingAs(User::factory()->complianceOfficer()->create());
-        $workflow = $this->flaggedWorkflow();
-        $task = $this->task('task-1', $workflow->external_id, 'reviewMatch');
-        Http::fake(fn (Request $request) => match (true) {
-            $request->method() === 'POST' => Http::response(null, 204),
-            str_contains($request->url(), '/runtime/tasks/task-1') => Http::response($task),
-            default => Http::response(['data' => [$task]]),
-        });
+        $officer = User::factory()->complianceOfficer()->create();
+        $this->actingAs($officer);
+        $run = $this->flaggedRun('contact', ['address_line1' => '666 Shadow Lane', 'postal_code' => '66666', 'country' => 'United States']);
 
-        $this->get('/compliance/reviews')->assertInertia(fn (Assert $page) => $page->has('reviews', 1));
-        $this->post('/compliance/reviews/task-1', ['decision' => 'approved'])->assertRedirect('/compliance/reviews');
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved']);
 
-        $workflow->refresh();
-        $this->assertSame('approved', $workflow->status);
-        $this->assertSame('contact', $workflow->result['reviews'][0]['step']);
+        $run->refresh();
+        $this->assertSame('address_review', $run->status);
+        $this->assertSame([self::ADDRESS_MATCH], $run->result['matches']);
+
+        $this->get("/compliance/reviews/{$run->id}")->assertInertia(fn (Assert $page) => $page
+            ->where('review.failed_step', 'address')
+            ->has('review.earlier_reviews', 1)
+            ->where('review.earlier_reviews.0.step', 'contact')
+            ->where('review.earlier_reviews.0.matches', [self::PHONE_MATCH])
+        );
+
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'address', 'decision' => 'approved']);
+
+        $run->refresh();
+        $this->assertSame('approved', $run->status);
+        $this->assertSame(['contact', 'address'], array_column($run->result['reviews'], 'step'));
+        $this->assertSame(
+            [['approve_contact', 'address_check', $officer->id], ['flag_address', 'address_review', null], ['approve_address', 'approved', $officer->id]],
+            $run->transitions->map(fn ($step): array => [$step->transition, $step->to, $step->user_id])->all(),
+        );
     }
 
-    public function test_a_review_task_for_a_step_the_customer_is_not_flagged_at_is_not_offered(): void
+    public function test_rejecting_requires_notes_and_ends_the_check(): void
     {
         $this->actingAs(User::factory()->complianceOfficer()->create());
-        $workflow = $this->flaggedWorkflow();
-        Http::fake([
-            self::FLOWABLE.'/runtime/tasks/task-1' => Http::response($this->task('task-1', $workflow->external_id, 'reviewAddress')),
-            self::FLOWABLE.'/runtime/tasks*' => Http::response(['data' => [$this->task('task-1', $workflow->external_id, 'reviewAddress')]]),
-        ]);
+        $run = $this->flaggedRun('address');
 
-        $this->get('/compliance/reviews')->assertInertia(fn (Assert $page) => $page->has('reviews', 0));
-        $this->get('/compliance/reviews/task-1')->assertNotFound();
-    }
-
-    public function test_rejecting_requires_notes(): void
-    {
-        $this->actingAs(User::factory()->complianceOfficer()->create());
-        $workflow = $this->flaggedWorkflow();
-        $this->fakeTask('task-1', $workflow->external_id);
-
-        $this->from('/compliance/reviews/task-1')
-            ->post('/compliance/reviews/task-1', ['decision' => 'rejected', 'notes' => ''])
-            ->assertRedirect('/compliance/reviews/task-1')
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'address', 'decision' => 'rejected'])
             ->assertSessionHasErrors(['notes' => 'Explain why you are rejecting this customer.']);
+        $this->assertSame('address_review', $run->refresh()->status);
 
-        Http::assertNotSent(fn (Request $request) => $request->method() === 'POST');
-        $this->assertSame('flagged', $workflow->refresh()->status);
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'address', 'decision' => 'rejected', 'notes' => 'Confirmed match'])
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame('rejected', $run->refresh()->status);
+        $this->assertSame('rejected', $run->result['status']);
+        $this->assertSame(['rejected', 'rejected'], $run->subject->auditLogs()->orderBy('id')->pluck('event')->all());
+    }
+
+    public function test_a_decision_on_a_step_the_run_has_moved_on_from_is_not_recorded(): void
+    {
+        $this->actingAs(User::factory()->complianceOfficer()->create());
+        $run = $this->flaggedRun('address');
+
+        $this->from("/compliance/reviews/{$run->id}")
+            ->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved'])
+            ->assertRedirect("/compliance/reviews/{$run->id}")
+            ->assertSessionHasErrors(['decision' => 'Someone else has already completed this review.']);
+
+        $this->assertSame('address_review', $run->refresh()->status);
+        $this->assertSame(0, $run->subject->auditLogs()->count());
     }
 
     public function test_a_review_someone_else_just_completed_is_not_recorded_twice(): void
     {
         $this->actingAs(User::factory()->complianceOfficer()->create());
-        $workflow = $this->flaggedWorkflow();
-        Http::fake(fn (Request $request) => $request->method() === 'GET'
-            ? Http::response($this->task('task-1', $workflow->external_id))
-            : Http::response(['message' => 'Could not find a task with id task-1'], 404));
+        $run = $this->flaggedRun('contact');
+        $run->update(['status' => 'rejected']);
 
-        $this->from('/compliance/reviews/task-1')
-            ->post('/compliance/reviews/task-1', ['decision' => 'approved'])
-            ->assertRedirect('/compliance/reviews/task-1')
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved'])
             ->assertSessionHasErrors(['decision' => 'Someone else has already completed this review.']);
 
-        $this->assertSame('flagged', $workflow->refresh()->status);
-        $this->assertSame(0, $workflow->subject->auditLogs()->count());
+        $this->assertSame('rejected', $run->refresh()->status);
+        $this->assertSame(0, $run->subject->auditLogs()->count());
     }
 
     /**
+     * A verification run waiting for review of the given step. The customer's phone is on
+     * the demo sanctions list; their address is too when the address step is flagged.
+     *
+     * @param  'contact'|'address'  $step
      * @param  array<string, mixed>  $customerAttributes
      */
-    private function flaggedWorkflow(array $customerAttributes = []): WorkflowInstance
+    private function flaggedRun(string $step, array $customerAttributes = [], string $flaggedAt = '2026-10-28T21:00:00+00:00'): WorkflowInstance
     {
-        return Customer::factory()->create($customerAttributes)->workflow()->create([
+        $customer = Customer::factory()->create(['phone' => '+1 555 010 0666', ...$customerAttributes]);
+
+        return $customer->workflows()->create([
             'workflow' => WorkflowInstance::CUSTOMER_VERIFICATION,
-            'external_id' => 'process-'.fake()->unique()->randomNumber(5),
-            'status' => 'flagged',
+            'status' => "{$step}_review",
             'result' => [
                 'status' => 'flagged',
-                'failed_step' => 'contact',
-                'matches' => ['Phone number +1 555 010 0666 is on the Demo sanctions list'],
+                'failed_step' => $step,
+                'matches' => [$step === 'contact' ? self::PHONE_MATCH : self::ADDRESS_MATCH],
+                'flagged_at' => $flaggedAt,
             ],
         ]);
-    }
-
-    /**
-     * Flowable's REST representation of an open review task.
-     *
-     * @return array<string, mixed>
-     */
-    private function task(string $id, string $processInstanceId, string $definitionKey = 'reviewContact'): array
-    {
-        return [
-            'id' => $id,
-            'name' => $definitionKey === 'reviewContact' ? 'Review contact match' : 'Review address match',
-            'taskDefinitionKey' => $definitionKey,
-            'processInstanceId' => $processInstanceId,
-            'createTime' => '2026-10-28T21:00:00.000Z',
-        ];
-    }
-
-    private function fakeTask(string $id, string $processInstanceId, string $definitionKey = 'reviewContact'): void
-    {
-        Http::fake(fn (Request $request) => $request->method() === 'GET'
-            ? Http::response($this->task($id, $processInstanceId, $definitionKey))
-            : Http::response(null, 204));
     }
 }

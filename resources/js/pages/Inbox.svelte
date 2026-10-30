@@ -2,7 +2,7 @@
     import { Link, page } from '@inertiajs/svelte';
     import { customerSections } from '../customerFields.js';
 
-    let { items, engineAvailable } = $props();
+    let { items } = $props();
 
     // Flashed once by a save; it isn't kept in history, so going back doesn't show it again.
     const saved = $derived(page.flash?.customerSaved);
@@ -56,12 +56,6 @@
                 </p>
             </div>
             <button type="button" class="text-green-700 hover:text-green-900" onclick={() => (dismissedSave = saved)} aria-label="Dismiss">✕</button>
-        </div>
-    {/if}
-
-    {#if !engineAvailable}
-        <div class="mt-6 rounded-lg bg-amber-50 p-4 text-sm text-amber-800 ring-1 ring-amber-200" role="alert">
-            The workflow engine isn’t reachable, so sanctions reviews can’t be shown. Check that it’s running on port 8090.
         </div>
     {/if}
 

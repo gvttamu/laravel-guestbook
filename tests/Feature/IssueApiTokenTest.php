@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\Api\V1\CustomerController;
-use App\Http\Controllers\Api\V1\CustomerVerificationController;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Laravel\Sanctum\PersonalAccessToken;
@@ -35,15 +34,5 @@ class IssueApiTokenTest extends TestCase
 
         $this->assertSame(1, User::count());
         $this->assertSame(2, User::sole()->tokens()->count());
-    }
-
-    public function test_the_verify_option_also_allows_reporting_verification_results(): void
-    {
-        $this->artisan('api:issue-token', ['name' => 'Workflow engine', '--verify' => true])->assertSuccessful();
-
-        $this->assertSame(
-            [CustomerController::READ_ABILITY, CustomerVerificationController::VERIFY_ABILITY],
-            PersonalAccessToken::sole()->abilities,
-        );
     }
 }

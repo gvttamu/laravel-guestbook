@@ -23,14 +23,13 @@ class InboxController extends Controller
         $reviews = $request->user()->can('review-compliance') ? $this->openReviews() : collect();
         $drafts = $request->user()->can('capture-customers') ? $this->draftItems($request) : collect();
 
-        $items = $this->reviewItems($reviews ?? collect())
+        $items = $this->reviewItems($reviews)
             ->concat($drafts)
             ->sortBy(fn (array $item): int => Carbon::parse($item['since'])->getTimestamp())
             ->values();
 
         return Inertia::render('Inbox', [
             'items' => $items,
-            'engineAvailable' => $reviews !== null,
             // Replaces the shared count, so the nav badge matches the list shown.
             'inboxCount' => $items->count(),
         ]);
@@ -48,7 +47,7 @@ class InboxController extends Controller
             'customer' => $review['customer'],
             'failed_step' => $review['failed_step'],
             'matches' => $review['matches'],
-            'since' => $review['created_at'],
+            'since' => $review['flagged_at'],
             'url' => route('compliance.reviews.show', $review['id']),
         ]);
     }

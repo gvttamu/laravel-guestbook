@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\CancelWorkflowRun;
-use App\Jobs\StartWorkflowRun;
+use App\Jobs\RunVerificationChecks;
+use App\Jobs\ScoreCustomerFinancials;
 use App\Models\Customer;
 use App\Models\FormDraft;
 use App\Models\User;
@@ -24,7 +24,7 @@ class CustomerTest extends TestCase
         Customer::factory()->create(['first_name' => 'Ada']);
         $this->travel(1)->minutes();
         $grace = Customer::factory()->create(['first_name' => 'Grace']);
-        $grace->workflows()->create(['workflow' => WorkflowInstance::CUSTOMER_VERIFICATION, 'status' => 'running', 'current_task' => 'screenContact']);
+        $grace->workflows()->create(['workflow' => WorkflowInstance::CUSTOMER_VERIFICATION, 'status' => 'address_check']);
         $grace->workflows()->create(['workflow' => WorkflowInstance::FINANCIAL_SCORING, 'status' => 'superseded']);
         $grace->workflows()->create(['workflow' => WorkflowInstance::FINANCIAL_SCORING, 'status' => 'scored', 'result' => ['score' => 85, 'risk_band' => 'low']]);
 
@@ -34,7 +34,7 @@ class CustomerTest extends TestCase
                 ->component('customers/Index')
                 ->has('customers', 2)
                 ->where('customers.0.first_name', 'Grace')
-                ->where('customers.0.workflow.status', 'running')
+                ->where('customers.0.workflow.status', 'address_check')
                 ->where('customers.0.scoring.status', 'scored')
                 ->where('customers.0.scoring.result.score', 85)
                 ->where('customers.1.first_name', 'Ada')
@@ -143,12 +143,11 @@ class CustomerTest extends TestCase
     public function test_changing_screened_details_supersedes_the_unfinished_run_and_starts_a_new_check(): void
     {
         $this->actingAs(User::factory()->create());
-        config(['services.flowable.url' => 'http://flowable.test/process-api']);
-        Queue::fake([StartWorkflowRun::class, CancelWorkflowRun::class]);
+        Queue::fake([RunVerificationChecks::class, ScoreCustomerFinancials::class]);
         $customer = Customer::factory()->create();
-        $verified = $this->verificationRun($customer, 'verified', 'process-1');
+        $verified = $this->verificationRun($customer, 'verified');
         $this->travel(1)->minutes();
-        $flagged = $this->verificationRun($customer, 'flagged', 'process-2');
+        $flagged = $this->verificationRun($customer, 'contact_review');
 
         $this->saveEdits($customer, ['phone' => '+44 20 7946 0000'])
             ->assertSessionHasNoErrors();
@@ -158,37 +157,35 @@ class CustomerTest extends TestCase
         $newRun = $customer->workflow()->sole();
         $this->assertSame('pending', $newRun->status);
         $this->assertSame(3, $customer->workflows()->count());
-        Queue::assertPushed(StartWorkflowRun::class, fn (StartWorkflowRun $job) => $job->workflowInstance->is($newRun));
-        Queue::assertPushed(CancelWorkflowRun::class, 1);
-        Queue::assertPushed(CancelWorkflowRun::class, fn (CancelWorkflowRun $job) => $job->workflowInstance->is($flagged));
+        Queue::assertPushed(RunVerificationChecks::class, 1);
+        Queue::assertPushed(RunVerificationChecks::class, fn (RunVerificationChecks $job) => $job->workflowInstance->is($newRun));
     }
 
     public function test_changing_financials_supersedes_the_unfinished_scoring_run_and_scores_again(): void
     {
         $this->actingAs(User::factory()->create());
-        config(['services.flowable.url' => 'http://flowable.test/process-api']);
-        Queue::fake([StartWorkflowRun::class, CancelWorkflowRun::class]);
+        Queue::fake([RunVerificationChecks::class, ScoreCustomerFinancials::class]);
         $customer = Customer::factory()->create(['car_payments' => 250]);
-        $verification = $this->verificationRun($customer, 'flagged', 'process-1');
-        $scoring = $customer->workflows()->create(['workflow' => WorkflowInstance::FINANCIAL_SCORING, 'external_id' => 'process-2', 'status' => 'running']);
+        $verification = $this->verificationRun($customer, 'contact_review');
+        $scoring = $customer->workflows()->create(['workflow' => WorkflowInstance::FINANCIAL_SCORING, 'status' => 'pending']);
 
         $this->saveEdits($customer, ['car_payments' => null])
             ->assertSessionHasNoErrors();
 
         $this->assertNull($customer->refresh()->car_payments);
-        $this->assertSame('flagged', $verification->refresh()->status);
+        $this->assertSame('contact_review', $verification->refresh()->status);
         $this->assertSame('superseded', $scoring->refresh()->status);
         $newRun = $customer->scoring()->sole();
         $this->assertSame('pending', $newRun->status);
-        Queue::assertPushed(StartWorkflowRun::class, 1);
-        Queue::assertPushed(StartWorkflowRun::class, fn (StartWorkflowRun $job) => $job->workflowInstance->is($newRun));
-        Queue::assertPushed(CancelWorkflowRun::class, fn (CancelWorkflowRun $job) => $job->workflowInstance->is($scoring));
+        Queue::assertPushed(ScoreCustomerFinancials::class, 1);
+        Queue::assertPushed(ScoreCustomerFinancials::class, fn (ScoreCustomerFinancials $job) => $job->workflowInstance->is($newRun));
+        Queue::assertNotPushed(RunVerificationChecks::class);
     }
 
     public function test_an_equal_amount_in_another_format_is_not_a_change(): void
     {
         $this->actingAs(User::factory()->create());
-        Queue::fake([StartWorkflowRun::class]);
+        Queue::fake([RunVerificationChecks::class, ScoreCustomerFinancials::class]);
         $customer = Customer::factory()->create(['monthly_income' => 4200]);
 
         $this->saveEdits($customer, ['monthly_income' => 4200])
@@ -201,8 +198,7 @@ class CustomerTest extends TestCase
     public function test_changing_the_loan_amount_or_term_scores_again_without_rescreening(): void
     {
         $this->actingAs(User::factory()->create());
-        config(['services.flowable.url' => 'http://flowable.test/process-api']);
-        Queue::fake([StartWorkflowRun::class, CancelWorkflowRun::class]);
+        Queue::fake([RunVerificationChecks::class, ScoreCustomerFinancials::class]);
         $customer = Customer::factory()->create(['loan_amount' => 10000, 'loan_term_months' => 24]);
 
         $this->saveEdits($customer, ['loan_term_months' => 36])
@@ -210,13 +206,13 @@ class CustomerTest extends TestCase
 
         $this->assertEquals(['loan_term_months' => 36], $customer->auditLogs()->sole()->new_values);
         $this->assertSame([WorkflowInstance::FINANCIAL_SCORING], $customer->workflows()->pluck('workflow')->all());
-        Queue::assertPushed(StartWorkflowRun::class, fn (StartWorkflowRun $job) => $job->workflowInstance->is($customer->scoring));
+        Queue::assertPushed(ScoreCustomerFinancials::class, fn (ScoreCustomerFinancials $job) => $job->workflowInstance->is($customer->scoring));
     }
 
     public function test_changing_only_the_loan_purpose_is_audited_without_rerunning_any_workflow(): void
     {
         $this->actingAs(User::factory()->create());
-        Queue::fake([StartWorkflowRun::class, CancelWorkflowRun::class]);
+        Queue::fake([RunVerificationChecks::class, ScoreCustomerFinancials::class]);
         $customer = Customer::factory()->create(['loan_purpose' => 'car']);
 
         $this->saveEdits($customer, ['loan_purpose' => 'education'])
@@ -244,15 +240,14 @@ class CustomerTest extends TestCase
     public function test_changing_details_the_check_does_not_screen_keeps_the_current_run(): void
     {
         $this->actingAs(User::factory()->create());
-        config(['services.flowable.url' => 'http://flowable.test/process-api']);
-        Queue::fake([StartWorkflowRun::class, CancelWorkflowRun::class]);
+        Queue::fake([RunVerificationChecks::class, ScoreCustomerFinancials::class]);
         $customer = Customer::factory()->create(['first_name' => 'Ada']);
-        $flagged = $this->verificationRun($customer, 'flagged', 'process-1');
+        $flagged = $this->verificationRun($customer, 'contact_review');
 
         $this->saveEdits($customer, ['first_name' => 'Augusta', 'city' => 'Paris'])
             ->assertSessionHasNoErrors();
 
-        $this->assertSame('flagged', $flagged->refresh()->status);
+        $this->assertSame('contact_review', $flagged->refresh()->status);
         $this->assertSame(1, $customer->workflows()->count());
         Queue::assertNothingPushed();
     }
@@ -340,11 +335,10 @@ class CustomerTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page->where('customerIdsWithDrafts', [$customer->id]));
     }
 
-    private function verificationRun(Customer $customer, string $status, string $externalId): WorkflowInstance
+    private function verificationRun(Customer $customer, string $status): WorkflowInstance
     {
         return $customer->workflows()->create([
             'workflow' => WorkflowInstance::CUSTOMER_VERIFICATION,
-            'external_id' => $externalId,
             'status' => $status,
         ]);
     }

@@ -1,10 +1,12 @@
 <script>
     import { Link, useForm } from '@inertiajs/svelte';
+    import { untrack } from 'svelte';
     import { customerSections } from '../../customerFields.js';
 
     let { review } = $props();
 
-    const form = useForm({ decision: '', notes: '' });
+    // The step is sent back so the decision can't land on a step the run has moved to since this page loaded.
+    const form = useForm({ step: untrack(() => review.failed_step), decision: '', notes: '' });
 
     // A sanctions review doesn't need the customer's finances or loan application, so the server doesn't send them.
     const fields = customerSections.filter((section) => !['financials', 'loan'].includes(section.key)).flatMap((section) => section.fields);

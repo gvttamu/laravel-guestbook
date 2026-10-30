@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\UpdateCustomerDraftRequest;
-use App\Jobs\CancelWorkflowRun;
-use App\Jobs\StartWorkflowRun;
+use App\Jobs\RunVerificationChecks;
+use App\Jobs\ScoreCustomerFinancials;
 use App\Models\Customer;
 use App\Models\FormDraft;
 use App\Models\WorkflowInstance;
@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -157,10 +158,7 @@ class CustomerDraftController extends Controller
             return [$customer, $runs];
         });
 
-        // Once the transaction commits, queued jobs start the verification and financial scoring workflows in Flowable.
-        if (filled(config('services.flowable.url'))) {
-            $runs->each(fn (WorkflowInstance $run) => StartWorkflowRun::dispatch($run));
-        }
+        $this->startRuns($runs);
 
         return $this->toInboxAfterSaving($customer, 'created');
     }
@@ -206,11 +204,11 @@ class CustomerDraftController extends Controller
             WorkflowInstance::FINANCIAL_SCORING => array_intersect($changedFields, Customer::SCORED_FIELDS) !== [],
         ]));
 
-        [$newRuns, $supersededRuns] = DB::transaction(function () use ($request, $customerDraft, $customer, $changedFields, $version, $workflowsToRerun): array {
+        $newRuns = DB::transaction(function () use ($request, $customerDraft, $customer, $changedFields, $version, $workflowsToRerun): Collection {
             $customerDraft->delete();
 
             if ($changedFields === []) {
-                return [collect(), collect()];
+                return collect();
             }
 
             // Claiming the next version is a single atomic update, so of two
@@ -239,33 +237,40 @@ class CustomerDraftController extends Controller
             ]);
 
             if ($workflowsToRerun === []) {
-                return [collect(), collect()];
+                return collect();
             }
 
-            $supersededRuns = $customer->workflows()
+            $customer->workflows()
                 ->whereIn('workflow', $workflowsToRerun)
-                ->whereIn('status', WorkflowInstance::UNFINISHED_STATUSES)
+                ->whereIn('status', WorkflowInstance::unfinishedStatuses())
                 ->lockForUpdate()
-                ->get();
+                ->get()
+                ->each->supersede();
 
-            $supersededRuns->each->update(['status' => 'superseded', 'current_task' => null]);
-
-            $newRuns = collect($workflowsToRerun)->map(fn (string $workflow): WorkflowInstance => $customer->workflows()->create([
+            return collect($workflowsToRerun)->map(fn (string $workflow): WorkflowInstance => $customer->workflows()->create([
                 'workflow' => $workflow,
                 'status' => 'pending',
             ]));
-
-            return [$newRuns, $supersededRuns];
         });
 
-        if (filled(config('services.flowable.url'))) {
-            $supersededRuns->filter(fn (WorkflowInstance $run): bool => $run->external_id !== null)
-                ->each(fn (WorkflowInstance $run) => CancelWorkflowRun::dispatch($run));
-
-            $newRuns->each(fn (WorkflowInstance $run) => StartWorkflowRun::dispatch($run));
-        }
+        $this->startRuns($newRuns);
 
         return $this->toInboxAfterSaving($customer, $changedFields === [] ? 'unchanged' : 'updated');
+    }
+
+    /**
+     * Queue the jobs that run new workflow runs once the transaction commits.
+     *
+     * @param  Collection<int, WorkflowInstance>  $runs
+     */
+    private function startRuns(Collection $runs): void
+    {
+        foreach ($runs as $run) {
+            match ($run->workflow) {
+                WorkflowInstance::CUSTOMER_VERIFICATION => RunVerificationChecks::dispatch($run),
+                WorkflowInstance::FINANCIAL_SCORING => ScoreCustomerFinancials::dispatch($run),
+            };
+        }
     }
 
     /**

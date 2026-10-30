@@ -3,101 +3,54 @@
 namespace App\Http\Controllers\Concerns;
 
 use App\Models\WorkflowInstance;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\RequestException;
+use App\Workflows\CustomerVerification\CustomerVerification;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Http;
 
 /**
- * Compliance reviews are the "Review contact match" and "Review address match" user
- * tasks in the Flowable customer verification process. Flowable owns the task list;
- * this reads it and pairs each task with the flagged customer it reviews.
+ * A compliance review is a verification run waiting at one of its review places: the
+ * contact or address step found a sanctions match for an officer to approve or reject.
  */
 trait ListsComplianceReviews
 {
     /**
-     * The review tasks in customer-verification.bpmn20.xml, and the step whose matches each reviews.
+     * The open reviews, longest waiting first, each with the customer it reviews.
      *
-     * @var array<string, string>
+     * @return Collection<int, array<string, mixed>>
      */
-    private const REVIEW_TASKS = [
-        'reviewContact' => 'contact',
-        'reviewAddress' => 'address',
-    ];
-
-    /**
-     * The single review task of process versions 1 and 2. Those processes end after the
-     * review without reporting an outcome, so the decision itself is the outcome.
-     */
-    private const LEGACY_REVIEW_TASK = 'reviewMatch';
-
-    /**
-     * The open review tasks, oldest first, each with the customer it reviews. Null when
-     * the workflow engine can't be reached.
-     *
-     * @return Collection<int, array<string, mixed>>|null
-     */
-    private function openReviews(): ?Collection
+    private function openReviews(): Collection
     {
-        try {
-            $tasks = Http::flowable()
-                ->get('runtime/tasks', [
-                    'processDefinitionKey' => 'customerVerification',
-                    'candidateGroup' => 'compliance',
-                    'sort' => 'createTime',
-                    'order' => 'asc',
-                    'size' => 100,
-                ])
-                ->throw()
-                ->json('data');
-        } catch (ConnectionException|RequestException) {
-            return null;
-        }
-
-        $workflows = WorkflowInstance::with('subject:id,first_name,last_name,email')
-            ->where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)
-            ->where('status', 'flagged')
-            ->whereIn('external_id', array_column($tasks, 'processInstanceId'))
+        return $this->runsAwaitingReview()
+            ->with('subject:id,first_name,last_name,email')
             ->get()
-            ->keyBy('external_id');
-
-        return collect($tasks)
-            ->filter(fn (array $task): bool => $workflows->has($task['processInstanceId'])
-                && $this->reviewsCurrentFlag($task, $workflows[$task['processInstanceId']]))
-            ->map(fn (array $task): array => [
-                ...$this->review($task, $workflows[$task['processInstanceId']]),
-                'customer' => $workflows[$task['processInstanceId']]->subject->only(['id', 'first_name', 'last_name', 'email']),
+            ->map(fn (WorkflowInstance $run): array => [
+                ...$this->review($run),
+                'customer' => $run->subject->only(['id', 'first_name', 'last_name', 'email']),
             ])
+            ->sortBy('flagged_at')
             ->values();
     }
 
     /**
-     * Whether the task is a review task for the step the workflow is currently flagged at.
-     *
-     * @param  array<string, mixed>  $task
+     * @return Builder<WorkflowInstance>
      */
-    private function reviewsCurrentFlag(array $task, WorkflowInstance $workflow): bool
+    private function runsAwaitingReview(): Builder
     {
-        if (($task['taskDefinitionKey'] ?? null) === self::LEGACY_REVIEW_TASK) {
-            return true;
-        }
-
-        $step = self::REVIEW_TASKS[$task['taskDefinitionKey'] ?? ''] ?? null;
-
-        return $step !== null && $step === ($workflow->result['failed_step'] ?? null);
+        return WorkflowInstance::where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)
+            ->whereIn('status', array_keys(CustomerVerification::REVIEW_PLACES));
     }
 
     /**
-     * @param  array<string, mixed>  $task
-     * @return array<string, mixed>
+     * @return array{id: int, flagged_at: string, failed_step: string, matches: list<string>}
      */
-    private function review(array $task, WorkflowInstance $workflow): array
+    private function review(WorkflowInstance $run): array
     {
         return [
-            'id' => $task['id'],
-            'created_at' => $task['createTime'],
-            'failed_step' => $workflow->result['failed_step'] ?? null,
-            'matches' => $workflow->result['matches'] ?? [],
+            'id' => $run->id,
+            // Runs flagged by the old workflow engine have no flagged_at; they last changed when they were flagged.
+            'flagged_at' => $run->result['flagged_at'] ?? $run->updated_at->toIso8601String(),
+            'failed_step' => CustomerVerification::REVIEW_PLACES[$run->status],
+            'matches' => $run->result['matches'] ?? [],
         ];
     }
 }

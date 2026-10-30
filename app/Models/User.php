@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Http\Controllers\CustomerDraftController;
+use App\Workflows\CustomerVerification\CustomerVerification;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -41,14 +42,12 @@ class User extends Authenticatable
 
     /**
      * How many items the inbox holds: customers flagged for review for compliance officers,
-     * and their own customer drafts for users who capture customers. Counted from the
-     * database so every page can show it without asking the workflow engine; a flagged
-     * verification run is one with an open review task, since a decision moves it back to "running".
+     * and their own customer drafts for users who capture customers.
      */
     public function inboxCount(): int
     {
         $reviews = $this->can('review-compliance')
-            ? WorkflowInstance::where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)->where('status', 'flagged')->count()
+            ? WorkflowInstance::where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)->whereIn('status', array_keys(CustomerVerification::REVIEW_PLACES))->count()
             : 0;
 
         $drafts = $this->can('capture-customers')

@@ -35,10 +35,4 @@ return [
         ],
     ],
 
-    'flowable' => [
-        'url' => env('FLOWABLE_URL'),
-        'username' => env('FLOWABLE_USERNAME'),
-        'password' => env('FLOWABLE_PASSWORD'),
-    ],
-
 ];

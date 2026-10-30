@@ -7,18 +7,18 @@ use App\Http\Requests\StoreReviewDecisionRequest;
 use App\Models\Customer;
 use App\Models\User;
 use App\Models\WorkflowInstance;
+use App\Workflows\CustomerVerification\CustomerVerification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Compliance reviews are the "Review contact match" and "Review address match" user
- * tasks in the Flowable customer verification process. Flowable owns the task list;
- * this controller shows those tasks with the customer's details and completes them.
+ * Compliance reviews are verification runs waiting for an officer to approve or reject
+ * a sanctions match (see CustomerVerification). This lists them, shows one with the
+ * customer's details, and records the decision.
  */
 class ComplianceReviewController extends Controller
 {
@@ -26,24 +26,21 @@ class ComplianceReviewController extends Controller
 
     public function index(): Response
     {
-        $reviews = $this->openReviews();
-
         return Inertia::render('compliance/Reviews', [
-            'reviews' => $reviews ?? [],
-            'engineAvailable' => $reviews !== null,
+            'reviews' => $this->openReviews(),
         ]);
     }
 
-    public function show(string $task): Response
+    public function show(int $run): Response
     {
-        [$task, $workflow] = $this->findReview($task);
+        $workflow = $this->runsAwaitingReview()->with('subject')->findOrFail($run);
 
         /** @var Customer $customer */
         $customer = $workflow->subject;
 
         return Inertia::render('compliance/Review', [
             'review' => [
-                ...$this->review($task, $workflow),
+                ...$this->review($workflow),
                 // A sanctions review doesn't need the customer's finances or loan application.
                 'customer' => Arr::only($customer->toArray(), ['id', ...array_diff($customer->getFillable(), Customer::FINANCIAL_FIELDS, Customer::LOAN_FIELDS)]),
                 'earlier_reviews' => $this->earlierReviews($workflow),
@@ -52,93 +49,25 @@ class ComplianceReviewController extends Controller
     }
 
     /**
-     * Record the decision on the customer's workflow with an audit entry, then complete
-     * the review task in Flowable. The workflow goes back to "running": the engine may
-     * still check the address, and it reports the outcome when the check ends.
-     *
-     * The workflow is updated before the task is completed, in one transaction, so the
-     * engine's next report can't arrive first and then be overwritten. If Flowable
-     * doesn't complete the task, nothing is recorded.
+     * Record the decision on the step the officer reviewed. The run is locked while the
+     * decision is recorded, so of two officers deciding at once only the first counts; the
+     * other is told, as is an officer whose run has moved on to another step since they
+     * opened it.
      */
-    public function decide(StoreReviewDecisionRequest $request, string $task): RedirectResponse
+    public function decide(StoreReviewDecisionRequest $request, int $run, CustomerVerification $verification): RedirectResponse
     {
-        [$task, $workflow] = $this->findReview($task);
+        DB::transaction(function () use ($request, $run, $verification): void {
+            $workflow = WorkflowInstance::where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)->lockForUpdate()->findOrFail($run);
 
-        $decision = $request->validated('decision');
-        $notes = $request->validated('notes');
-        $isLegacyReview = $task['taskDefinitionKey'] === self::LEGACY_REVIEW_TASK;
-        $step = $isLegacyReview ? $workflow->result['failed_step'] : self::REVIEW_TASKS[$task['taskDefinitionKey']];
-        $status = $isLegacyReview ? $decision : 'running';
-
-        DB::transaction(function () use ($request, $task, $workflow, $decision, $notes, $step, $status): void {
-            $claimed = WorkflowInstance::whereKey($workflow->getKey())->where('status', 'flagged')->update(['status' => $status]);
-
-            if ($claimed === 0) {
+            if ((CustomerVerification::REVIEW_PLACES[$workflow->status] ?? null) !== $request->validated('step')) {
                 throw ValidationException::withMessages(['decision' => 'Someone else has already completed this review.']);
             }
 
-            $workflow->update([
-                'status' => $status,
-                'result' => [...$workflow->result, 'reviews' => [
-                    ...($workflow->result['reviews'] ?? []),
-                    [
-                        'step' => $step,
-                        'matches' => $workflow->result['matches'] ?? [],
-                        'decision' => $decision,
-                        'notes' => $notes,
-                        'reviewed_by' => $request->user()->id,
-                        'reviewed_at' => now()->toIso8601String(),
-                    ],
-                ]],
-            ]);
-
-            $workflow->subject->auditLogs()->create([
-                'user_id' => $request->user()->id,
-                'event' => $decision,
-                'new_values' => ['review_step' => $step, 'review_decision' => $decision, 'review_notes' => $notes],
-                'ip_address' => $request->ip(),
-            ]);
-
-            $completion = Http::flowable()->post("runtime/tasks/{$task['id']}", [
-                'action' => 'complete',
-                'variables' => [
-                    ['name' => 'reviewDecision', 'value' => $decision],
-                    ['name' => 'reviewNotes', 'value' => $notes ?? ''],
-                ],
-            ]);
-
-            if ($completion->notFound()) {
-                throw ValidationException::withMessages(['decision' => 'Someone else has already completed this review.']);
-            }
-
-            $completion->throw();
+            $verification->decide($workflow, $request->validated('decision'), $request->validated('notes'), $request->user(), $request->ip());
+            $workflow->save();
         });
 
         return to_route('compliance.reviews.index');
-    }
-
-    /**
-     * Fetch an open review task and the customer workflow it belongs to.
-     *
-     * @return array{0: array<string, mixed>, 1: WorkflowInstance}
-     */
-    private function findReview(string $taskId): array
-    {
-        $response = Http::flowable()->get("runtime/tasks/{$taskId}");
-
-        abort_if($response->notFound(), 404);
-
-        $task = $response->throw()->json();
-
-        $workflow = WorkflowInstance::with('subject')
-            ->where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)
-            ->where('status', 'flagged')
-            ->where('external_id', $task['processInstanceId'] ?? null)
-            ->first();
-
-        abort_if($workflow === null || ! $this->reviewsCurrentFlag($task, $workflow), 404);
-
-        return [$task, $workflow];
     }
 
     /**

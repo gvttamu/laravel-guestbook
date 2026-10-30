@@ -6,7 +6,9 @@ use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CustomerDraftController;
 use App\Http\Controllers\GuestbookController;
 use App\Http\Controllers\InboxController;
+use App\Http\Controllers\WorkflowController;
 use App\Models\FormDraft;
+use App\Models\WorkflowInstance;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [GuestbookController::class, 'index'])->name('guestbook.index');
@@ -31,6 +33,10 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/inbox', [InboxController::class, 'index'])->name('inbox');
 
+    Route::get('/workflows/{workflow}', [WorkflowController::class, 'show'])
+        ->whereIn('workflow', array_keys(WorkflowInstance::STATE_MACHINES))
+        ->name('workflows.show');
+
     // Compliance officers work only from the inbox and review screens, so the customer list is closed to them too.
     Route::middleware('can:capture-customers')->group(function () {
         Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
@@ -46,11 +52,11 @@ Route::middleware('auth')->group(function () {
 
     Route::middleware('can:review-compliance')->group(function () {
         Route::get('/compliance/reviews', [ComplianceReviewController::class, 'index'])->name('compliance.reviews.index');
-        Route::get('/compliance/reviews/{task}', [ComplianceReviewController::class, 'show'])
-            ->where('task', '[A-Za-z0-9-]+')
+        Route::get('/compliance/reviews/{run}', [ComplianceReviewController::class, 'show'])
+            ->whereNumber('run')
             ->name('compliance.reviews.show');
-        Route::post('/compliance/reviews/{task}', [ComplianceReviewController::class, 'decide'])
-            ->where('task', '[A-Za-z0-9-]+')
+        Route::post('/compliance/reviews/{run}', [ComplianceReviewController::class, 'decide'])
+            ->whereNumber('run')
             ->name('compliance.reviews.decide');
     });
 });

@@ -2,7 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\StartWorkflowRun;
+use App\Jobs\RunVerificationChecks;
+use App\Jobs\ScoreCustomerFinancials;
 use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\FormDraft;
@@ -184,8 +185,7 @@ class CustomerDraftTest extends TestCase
     {
         $user = User::factory()->create();
         $this->actingAs($user);
-        config(['services.flowable.url' => 'http://flowable.test/process-api']);
-        Queue::fake([StartWorkflowRun::class]);
+        Queue::fake([RunVerificationChecks::class, ScoreCustomerFinancials::class]);
         $draft = FormDraft::factory()->for($user)->completeCustomer()->create();
 
         $response = $this->post("/customer-drafts/{$draft->id}/submit")
@@ -211,26 +211,25 @@ class CustomerDraftTest extends TestCase
             ['customer-verification' => 'pending', 'financial-scoring' => 'pending'],
             $customer->workflows()->pluck('status', 'workflow')->all(),
         );
-        Queue::assertPushed(StartWorkflowRun::class, 2);
-        Queue::assertPushed(StartWorkflowRun::class, fn (StartWorkflowRun $job) => $job->workflowInstance->is($customer->workflow));
-        Queue::assertPushed(StartWorkflowRun::class, fn (StartWorkflowRun $job) => $job->workflowInstance->is($customer->scoring));
+        Queue::assertPushed(RunVerificationChecks::class, fn (RunVerificationChecks $job) => $job->workflowInstance->is($customer->workflow));
+        Queue::assertPushed(ScoreCustomerFinancials::class, fn (ScoreCustomerFinancials $job) => $job->workflowInstance->is($customer->scoring));
 
         $this->assertModelMissing($draft);
     }
 
-    public function test_submitting_without_flowable_configured_leaves_the_workflows_pending(): void
+    public function test_a_submitted_customer_is_verified_and_scored_by_the_queue(): void
     {
         $user = User::factory()->create();
         $this->actingAs($user);
-        config(['services.flowable.url' => null]);
-        Queue::fake([StartWorkflowRun::class]);
         $draft = FormDraft::factory()->for($user)->completeCustomer()->create();
 
         $this->post("/customer-drafts/{$draft->id}/submit")
             ->assertRedirect('/inbox');
 
-        $this->assertSame(['pending'], WorkflowInstance::distinct()->pluck('status')->all());
-        Queue::assertNotPushed(StartWorkflowRun::class);
+        $customer = Customer::sole();
+        $this->assertSame('verified', $customer->workflow->status);
+        $this->assertSame('scored', $customer->scoring->status);
+        $this->assertSame(['created', 'verified', 'scored'], $customer->auditLogs()->orderBy('id')->pluck('event')->all());
     }
 
     public function test_submitting_an_incomplete_draft_keeps_it_and_reports_missing_fields(): void

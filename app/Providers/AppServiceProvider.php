@@ -3,9 +3,9 @@
 namespace App\Providers;
 
 use App\Models\User;
-use Illuminate\Http\Client\PendingRequest;
+use App\Workflows\CustomerVerification\SanctionsRegistry;
+use App\Workflows\FinancialScoring\FinancialScorecard;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -15,7 +15,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(SanctionsRegistry::class);
+        $this->app->bind(FinancialScorecard::class, fn (): FinancialScorecard => new FinancialScorecard(config('scoring.annual_interest_rate')));
     }
 
     /**
@@ -27,10 +28,5 @@ class AppServiceProvider extends ServiceProvider
 
         // Compliance officers review the customers others capture, so they don't capture or edit customers themselves.
         Gate::define('capture-customers', fn (User $user): bool => ! $user->isComplianceOfficer());
-
-        Http::macro('flowable', fn (): PendingRequest => Http::baseUrl(config('services.flowable.url'))
-            ->withBasicAuth(config('services.flowable.username'), config('services.flowable.password'))
-            ->acceptJson()
-            ->timeout(10));
     }
 }

@@ -2,14 +2,20 @@
 
 namespace App\Models;
 
+use App\Workflows\CustomerVerification\CustomerVerification;
+use App\Workflows\FinancialScoring\FinancialScoring;
+use App\Workflows\StateMachineWorkflow;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 /**
- * Laravel's record of a workflow running in the Flowable engine. `external_id` is the
- * Flowable process instance id; `status` moves from pending (not yet started in
- * Flowable) to running, then to the outcome the engine reports back. A run that a
- * newer run replaces before it finishes becomes superseded.
+ * One run of a workflow for a subject (a customer). Each workflow is a Symfony state
+ * machine (see STATE_MACHINES) whose place is the run's `status`. A run that a newer
+ * run replaces before it finishes becomes superseded.
+ *
+ * `external_id` is the Flowable process instance id of runs from before the workflows
+ * moved into the app; newer runs have none.
  */
 class WorkflowInstance extends Model
 {
@@ -18,21 +24,14 @@ class WorkflowInstance extends Model
     public const FINANCIAL_SCORING = 'financial-scoring';
 
     /**
-     * The key of the Flowable process definition each workflow runs.
+     * The state machine each workflow runs.
      *
-     * @var array<string, string>
+     * @var array<string, class-string<StateMachineWorkflow>>
      */
-    public const PROCESS_DEFINITION_KEYS = [
-        self::CUSTOMER_VERIFICATION => 'customerVerification',
-        self::FINANCIAL_SCORING => 'financialScoring',
+    public const STATE_MACHINES = [
+        self::CUSTOMER_VERIFICATION => CustomerVerification::class,
+        self::FINANCIAL_SCORING => FinancialScoring::class,
     ];
-
-    /**
-     * Statuses of a run that hasn't reached a final outcome yet.
-     *
-     * @var list<string>
-     */
-    public const UNFINISHED_STATUSES = ['pending', 'running', 'flagged'];
 
     /**
      * The attributes that are mass assignable.
@@ -59,9 +58,45 @@ class WorkflowInstance extends Model
         ];
     }
 
-    public function processDefinitionKey(): string
+    /**
+     * Statuses of a run that hasn't reached a final outcome yet, in any workflow.
+     *
+     * @return list<string>
+     */
+    public static function unfinishedStatuses(): array
     {
-        return self::PROCESS_DEFINITION_KEYS[$this->workflow];
+        return array_values(array_unique(array_merge(
+            ...array_map(fn (string $workflow): array => app($workflow)->unfinishedPlaces(), array_values(self::STATE_MACHINES)),
+        )));
+    }
+
+    /**
+     * The state machine this run follows.
+     */
+    public function stateMachineWorkflow(): StateMachineWorkflow
+    {
+        return app(self::STATE_MACHINES[$this->workflow]);
+    }
+
+    /**
+     * Mark an unfinished run as replaced by a newer one, by its state machine's "supersede"
+     * transition, so it can only be superseded from a step that allows it.
+     */
+    public function supersede(): void
+    {
+        $this->stateMachineWorkflow()->apply($this, StateMachineWorkflow::SUPERSEDE);
+        $this->current_task = null;
+        $this->save();
+    }
+
+    /**
+     * The steps the run has taken, in order.
+     *
+     * @return HasMany<WorkflowTransition, $this>
+     */
+    public function transitions(): HasMany
+    {
+        return $this->hasMany(WorkflowTransition::class)->orderBy('id');
     }
 
     /**
