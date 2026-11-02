@@ -21,7 +21,7 @@ class CustomerController extends Controller
     {
         return Inertia::render('customers/Index', [
             'customers' => fn () => Customer::with([
-                'workflow:id,subject_type,subject_id,workflow,status,current_task,result',
+                'verification:id,subject_type,subject_id,workflow,status,current_task,result',
                 'scoring:id,subject_type,subject_id,workflow,status,result',
             ])
                 ->latest()

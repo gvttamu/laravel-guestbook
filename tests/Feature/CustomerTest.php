@@ -34,11 +34,11 @@ class CustomerTest extends TestCase
                 ->component('customers/Index')
                 ->has('customers', 2)
                 ->where('customers.0.first_name', 'Grace')
-                ->where('customers.0.workflow.status', 'address_check')
+                ->where('customers.0.verification.status', 'address_check')
                 ->where('customers.0.scoring.status', 'scored')
                 ->where('customers.0.scoring.result.score', 85)
                 ->where('customers.1.first_name', 'Ada')
-                ->where('customers.1.workflow', null)
+                ->where('customers.1.verification', null)
                 ->where('customers.1.scoring', null)
                 ->where('hasDraft', false)
                 ->where('auditHistory', null)
@@ -154,7 +154,7 @@ class CustomerTest extends TestCase
 
         $this->assertSame('verified', $verified->refresh()->status);
         $this->assertSame('superseded', $flagged->refresh()->status);
-        $newRun = $customer->workflow()->sole();
+        $newRun = $customer->verification()->sole();
         $this->assertSame('pending', $newRun->status);
         $this->assertSame(3, $customer->workflows()->count());
         Queue::assertPushed(RunVerificationChecks::class, 1);

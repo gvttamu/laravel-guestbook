@@ -2,6 +2,7 @@
 
 namespace App\Workflows\CustomerVerification;
 
+use App\Jobs\NotifyOfficerOfScreeningReview;
 use App\Jobs\RunVerificationChecks;
 use App\Models\Customer;
 use App\Models\User;
@@ -10,8 +11,8 @@ use App\Workflows\StateMachineWorkflow;
 
 /**
  * Customer verification: screen the contact details, then the address, against the
- * sanctions list. A step that finds a match waits for a compliance officer to review it:
- * an approved contact match goes on to the address check, and a rejected match ends the
+ * sanctions list. A step that finds a match waits for a compliance officer to review it,
+ * and every compliance officer is emailed that it's waiting. An approved contact match goes on to the address check, and a rejected match ends the
  * check. It ends verified when nothing matched, approved when every match was approved,
  * or rejected.
  *
@@ -180,6 +181,9 @@ class CustomerVerification extends StateMachineWorkflow
         $this->apply($run, $transition);
 
         $run->subject->auditLogs()->create(['event' => 'flagged', 'new_values' => $report]);
+
+        // Each compliance officer is emailed once the run is saved, so the email can't arrive before the review is open.
+        User::complianceOfficers()->each(fn (User $officer) => NotifyOfficerOfScreeningReview::dispatch($run, $step, $officer));
     }
 
     /**

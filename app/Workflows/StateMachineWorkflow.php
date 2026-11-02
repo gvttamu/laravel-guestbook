@@ -9,6 +9,7 @@ use SplObjectStorage;
 use Symfony\Component\Workflow\Definition;
 use Symfony\Component\Workflow\DefinitionBuilder;
 use Symfony\Component\Workflow\Dumper\MermaidDumper;
+use Symfony\Component\Workflow\Dumper\StateMachineGraphvizDumper;
 use Symfony\Component\Workflow\Metadata\InMemoryMetadataStore;
 use Symfony\Component\Workflow\StateMachine;
 use Symfony\Component\Workflow\Transition;
@@ -63,7 +64,7 @@ abstract class StateMachineWorkflow
     }
 
     /**
-     * Each place's label, in the order the diagram numbers them (place0, place1, ...).
+     * Each place's label, keyed by place, starting where every run starts.
      *
      * @return array<string, string>
      */
@@ -79,8 +80,9 @@ abstract class StateMachineWorkflow
 
     /**
      * Move the run along a transition and record the step, naming the person who made it, if
-     * anyone did (automatic steps have nobody). Always use this rather than the state machine's own apply(), so no step goes
-     * unrecorded. The run must already be saved; the caller saves its new status.
+     * anyone did (automatic steps have nobody). Always use this rather than the state machine's
+     * own apply(), so no step goes unrecorded. The run must already be saved; the caller saves
+     * its new status.
      */
     public function apply(WorkflowInstance $run, string $transition, ?User $by = null): void
     {
@@ -146,6 +148,17 @@ abstract class StateMachineWorkflow
             ->dump($this->definition());
     }
 
+    /**
+     * The workflow in Graphviz's DOT language, for `php artisan workflows:dump`.
+     */
+    public function graphviz(): string
+    {
+        return (new StateMachineGraphvizDumper)->dump($this->definition(), options: ['label' => $this->title()]);
+    }
+
+    /**
+     * The Symfony definition, with each place's and transition's label as metadata for Symfony's dumpers.
+     */
     private function definition(): Definition
     {
         $transitions = [];

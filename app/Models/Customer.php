@@ -162,7 +162,7 @@ class Customer extends Model
      *
      * @return MorphOne<WorkflowInstance, $this>
      */
-    public function workflow(): MorphOne
+    public function verification(): MorphOne
     {
         return $this->latestRunOf(WorkflowInstance::CUSTOMER_VERIFICATION);
     }

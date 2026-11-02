@@ -111,11 +111,11 @@
                             <td class="px-4 py-3">{customer.email}</td>
                             <td class="px-4 py-3">{customer.city}, {customer.country}</td>
                             <td class="px-4 py-3">
-                                {#if customer.workflow}
-                                    {@const verification = verificationLabels[customer.workflow.status] ?? { badge: customer.workflow.status }}
+                                {#if customer.verification}
+                                    {@const verification = verificationLabels[customer.verification.status] ?? { badge: customer.verification.status }}
                                     <!-- The badge opens the verification workflow's diagram, showing where this run is. -->
                                     <Link
-                                        href={`/workflows/customer-verification?run=${customer.workflow.id}`}
+                                        href={`/workflows/customer-verification?run=${customer.verification.id}`}
                                         class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 hover:underline {workflowStyles[verification.badge] ??
                                             'bg-slate-50 text-slate-700 ring-slate-200'}"
                                     >
@@ -123,11 +123,11 @@
                                     </Link>
                                     {#if verification.awaitingReview}
                                         <span class="mt-1 block text-xs text-slate-500">at {verification.awaitingReview} check · awaiting review</span>
-                                    {:else if customer.workflow.status === 'address_check'}
-                                        {@const lastReview = customer.workflow.result.reviews.at(-1)}
+                                    {:else if customer.verification.status === 'address_check'}
+                                        {@const lastReview = customer.verification.result.reviews.at(-1)}
                                         <span class="mt-1 block text-xs text-slate-500">{lastReview.step} match {lastReview.decision} · finishing check</span>
-                                    {:else if customer.workflow.result?.failed_step}
-                                        <span class="mt-1 block text-xs text-slate-500">at {customer.workflow.result.failed_step} check</span>
+                                    {:else if customer.verification.result?.failed_step}
+                                        <span class="mt-1 block text-xs text-slate-500">at {customer.verification.result.failed_step} check</span>
                                     {/if}
                                 {:else}
                                     <span class="text-slate-400">—</span>

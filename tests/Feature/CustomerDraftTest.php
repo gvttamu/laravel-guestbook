@@ -211,7 +211,7 @@ class CustomerDraftTest extends TestCase
             ['customer-verification' => 'pending', 'financial-scoring' => 'pending'],
             $customer->workflows()->pluck('status', 'workflow')->all(),
         );
-        Queue::assertPushed(RunVerificationChecks::class, fn (RunVerificationChecks $job) => $job->workflowInstance->is($customer->workflow));
+        Queue::assertPushed(RunVerificationChecks::class, fn (RunVerificationChecks $job) => $job->workflowInstance->is($customer->verification));
         Queue::assertPushed(ScoreCustomerFinancials::class, fn (ScoreCustomerFinancials $job) => $job->workflowInstance->is($customer->scoring));
 
         $this->assertModelMissing($draft);
@@ -227,7 +227,7 @@ class CustomerDraftTest extends TestCase
             ->assertRedirect('/inbox');
 
         $customer = Customer::sole();
-        $this->assertSame('verified', $customer->workflow->status);
+        $this->assertSame('verified', $customer->verification->status);
         $this->assertSame('scored', $customer->scoring->status);
         $this->assertSame(['created', 'verified', 'scored'], $customer->auditLogs()->orderBy('id')->pluck('event')->all());
     }
