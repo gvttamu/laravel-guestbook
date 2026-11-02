@@ -62,7 +62,8 @@ class AuthenticationTest extends TestCase
         $this->from('/login')
             ->post('/login', ['email' => 'ada@example.com', 'password' => 'wrong-password'])
             ->assertRedirect('/login')
-            ->assertSessionHasErrors(['email' => 'These credentials do not match our records.']);
+            ->assertSessionHasNoErrors()
+            ->assertInertiaFlash('error', 'These credentials do not match our records.');
 
         $this->assertGuest();
     }

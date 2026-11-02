@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -24,8 +23,11 @@ class AuthenticatedSessionController extends Controller
             'password' => ['required', 'string'],
         ]);
 
+        // Wrong credentials aren't a problem with either field on its own, so they're reported as a general error.
         if (! Auth::attempt($credentials, $request->boolean('remember'))) {
-            throw ValidationException::withMessages(['email' => __('auth.failed')]);
+            Inertia::flash('error', __('auth.failed'));
+
+            return back();
         }
 
         $request->session()->regenerate();

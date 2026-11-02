@@ -160,8 +160,9 @@ class ComplianceReviewTest extends TestCase
 
         $this->from("/compliance/reviews/{$run->id}")
             ->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved'])
-            ->assertRedirect("/compliance/reviews/{$run->id}")
-            ->assertSessionHasErrors(['decision' => 'Someone else has already completed this review.']);
+            ->assertRedirect('/compliance/reviews')
+            ->assertSessionHasNoErrors()
+            ->assertInertiaFlash('error', 'Someone else has already completed this review, so your decision wasn’t recorded.');
 
         $this->assertSame('address_review', $run->refresh()->status);
         $this->assertSame(0, $run->subject->auditLogs()->count());
@@ -174,7 +175,8 @@ class ComplianceReviewTest extends TestCase
         $run->update(['status' => 'rejected']);
 
         $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved'])
-            ->assertSessionHasErrors(['decision' => 'Someone else has already completed this review.']);
+            ->assertRedirect('/compliance/reviews')
+            ->assertInertiaFlash('error', 'Someone else has already completed this review, so your decision wasn’t recorded.');
 
         $this->assertSame('rejected', $run->refresh()->status);
         $this->assertSame(0, $run->subject->auditLogs()->count());

@@ -1,5 +1,6 @@
 <script>
     import { Link, page } from '@inertiajs/svelte';
+    import FlashMessage from '../components/FlashMessage.svelte';
 
     let { children } = $props();
 
@@ -41,5 +42,7 @@
         {/if}
     </nav>
 </header>
+
+<FlashMessage />
 
 {@render children()}

@@ -11,7 +11,6 @@ use App\Workflows\CustomerVerification\CustomerVerification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -56,16 +55,22 @@ class ComplianceReviewController extends Controller
      */
     public function decide(StoreReviewDecisionRequest $request, int $run, CustomerVerification $verification): RedirectResponse
     {
-        DB::transaction(function () use ($request, $run, $verification): void {
+        $decided = DB::transaction(function () use ($request, $run, $verification): bool {
             $workflow = WorkflowInstance::where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)->lockForUpdate()->findOrFail($run);
 
             if ((CustomerVerification::REVIEW_PLACES[$workflow->status] ?? null) !== $request->validated('step')) {
-                throw ValidationException::withMessages(['decision' => 'Someone else has already completed this review.']);
+                return false;
             }
 
             $verification->decide($workflow, $request->validated('decision'), $request->validated('notes'), $request->user(), $request->ip());
             $workflow->save();
+
+            return true;
         });
+
+        if (! $decided) {
+            Inertia::flash('error', 'Someone else has already completed this review, so your decision wasn’t recorded.');
+        }
 
         return to_route('compliance.reviews.index');
     }

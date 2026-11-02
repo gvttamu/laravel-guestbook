@@ -275,7 +275,8 @@ class CustomerTest extends TestCase
         $this->from("/customer-drafts/{$staleDraft->id}/basic")
             ->post("/customer-drafts/{$staleDraft->id}/submit")
             ->assertRedirect("/customer-drafts/{$staleDraft->id}/basic")
-            ->assertSessionHasErrors(['version' => 'Someone else changed this customer after you started editing, so your changes weren’t saved.']);
+            ->assertSessionHasNoErrors()
+            ->assertInertiaFlash('error', 'Someone else changed this customer after you started editing, so your changes weren’t saved.');
 
         $customer->refresh();
         $this->assertSame('Paris', $customer->city);

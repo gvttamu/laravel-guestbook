@@ -16,7 +16,6 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -204,10 +203,10 @@ class CustomerDraftController extends Controller
             WorkflowInstance::FINANCIAL_SCORING => array_intersect($changedFields, Customer::SCORED_FIELDS) !== [],
         ]));
 
-        $newRuns = DB::transaction(function () use ($request, $customerDraft, $customer, $changedFields, $version, $workflowsToRerun): Collection {
-            $customerDraft->delete();
-
+        $newRuns = DB::transaction(function () use ($request, $customerDraft, $customer, $changedFields, $version, $workflowsToRerun): ?Collection {
             if ($changedFields === []) {
+                $customerDraft->delete();
+
                 return collect();
             }
 
@@ -218,10 +217,10 @@ class CustomerDraftController extends Controller
                 ->update(['version' => $version + 1]);
 
             if ($claimed === 0) {
-                throw ValidationException::withMessages([
-                    'version' => 'Someone else changed this customer after you started editing, so your changes weren’t saved.',
-                ]);
+                return null;
             }
+
+            $customerDraft->delete();
 
             $oldValues = $this->auditValues($customer, $changedFields, original: true);
 
@@ -252,6 +251,12 @@ class CustomerDraftController extends Controller
                 'status' => 'pending',
             ]));
         });
+
+        if ($newRuns === null) {
+            Inertia::flash('error', 'Someone else changed this customer after you started editing, so your changes weren’t saved.');
+
+            return back();
+        }
 
         $this->startRuns($newRuns);
 
