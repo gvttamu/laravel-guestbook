@@ -11,15 +11,22 @@ class DatabaseSeeder extends Seeder
     use WithoutModelEvents;
 
     /**
-     * Seed the application's database.
+     * Seed the application's database: a user who captures customers, with a draft of
+     * each workflow scenario waiting in their inbox, and a compliance officer to review
+     * the flagged ones. Both sign in with the password "password".
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        $capturer = User::factory()->create([
+            'name' => 'Casey Capturer',
+            'email' => 'capturer@example.com',
         ]);
+
+        User::factory()->complianceOfficer()->create([
+            'name' => 'Olive Officer',
+            'email' => 'officer@example.com',
+        ]);
+
+        $this->call(FormDraftSeeder::class, parameters: ['user' => $capturer]);
     }
 }
