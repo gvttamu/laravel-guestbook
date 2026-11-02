@@ -6,27 +6,41 @@ use App\Http\Controllers\Concerns\ListsCreditReviews;
 use App\Http\Requests\ReconsiderCreditDecisionRequest;
 use App\Http\Requests\StoreCreditDecisionRequest;
 use App\Models\Customer;
+use App\Models\User;
 use App\Models\WorkflowInstance;
 use App\Workflows\FinancialScoring\FinancialScoring;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
  * Credit reviews are loan applications waiting for a credit officer to approve or reject
- * them (see FinancialScoring). This lists them, shows one with the customer's financials
- * and scores, records the decision, and reopens a decided application to be reconsidered.
+ * them (see FinancialScoring). This lists them and the recently decided ones, shows one with
+ * the customer's financials and scores, records the decision, and reopens a decided application
+ * to be reconsidered.
  */
 class CreditReviewController extends Controller
 {
     use ListsCreditReviews;
 
+    /**
+     * How many decided applications the list shows, most recent first.
+     */
+    private const DECIDED_LIMIT = 50;
+
+    /**
+     * The applications waiting for the officer, and the most recently decided ones, which any
+     * credit officer can open to reconsider.
+     */
     public function index(Request $request): Response
     {
         return Inertia::render('credit/Reviews', [
             'reviews' => $this->openCreditReviews($request->user()),
+            'decided' => $this->decidedApplications(),
         ]);
     }
 
@@ -140,6 +154,45 @@ class CreditReviewController extends Controller
         }
 
         return to_route('credit.reviews.show', $run);
+    }
+
+    /**
+     * The most recently decided applications that can still be reconsidered: approved or rejected,
+     * automatically or by an officer, and still the customer's latest. Each says who decided it.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function decidedApplications(): Collection
+    {
+        $runs = WorkflowInstance::where('workflow', WorkflowInstance::FINANCIAL_SCORING)
+            ->whereIn('status', ['approved', 'rejected'])
+            ->whereNotExists(fn (QueryBuilder $newer) => $newer->from('workflow_instances as newer')
+                ->whereColumn('newer.subject_type', 'workflow_instances.subject_type')
+                ->whereColumn('newer.subject_id', 'workflow_instances.subject_id')
+                ->where('newer.workflow', WorkflowInstance::FINANCIAL_SCORING)
+                ->whereColumn('newer.id', '>', 'workflow_instances.id'))
+            ->with('subject:id,first_name,last_name,email,loan_amount')
+            ->latest('updated_at')
+            ->latest('id')
+            ->limit(self::DECIDED_LIMIT)
+            ->get();
+
+        $officers = User::whereIn('id', $runs->flatMap(fn (WorkflowInstance $run): array => array_column($run->result['reviews'] ?? [], 'reviewed_by')))->pluck('name', 'id');
+
+        return $runs->map(function (WorkflowInstance $run) use ($officers): array {
+            $lastReview = collect($run->result['reviews'] ?? [])->last();
+
+            return [
+                'id' => $run->id,
+                'status' => $run->status,
+                'customer' => $run->subject->only(['id', 'first_name', 'last_name', 'email']),
+                'loan_amount' => $run->subject->loan_amount,
+                'credit_risk_tier' => $run->result['credit_risk_tier'] ?? null,
+                // The last review of a decided application is the officer's decision; with none, the engine decided it.
+                'decided_by' => $lastReview === null ? null : ($officers->get($lastReview['reviewed_by']) ?? 'an unknown officer'),
+                'decided_at' => $run->updated_at->toIso8601String(),
+            ];
+        });
     }
 
     /**

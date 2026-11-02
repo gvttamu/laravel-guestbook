@@ -16,9 +16,9 @@ class NotifyOfficerOfCreditReviewTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_a_referred_application_emails_the_credit_officers_of_its_tier_and_riskier_ones_only(): void
+    public function test_a_referred_application_emails_only_the_credit_officers_of_its_tier(): void
     {
-        $medium = User::factory()->creditOfficer('medium')->create();
+        $medium = User::factory()->creditOfficer('medium')->count(2)->create();
         $highest = User::factory()->creditOfficer('highest')->create();
         $low = User::factory()->creditOfficer('low')->create();
         $compliance = User::factory()->complianceOfficer()->create();
@@ -32,10 +32,10 @@ class NotifyOfficerOfCreditReviewTest extends TestCase
         $this->assertSame('credit_review', $run->status);
         $this->assertSame('medium', $run->result['credit_risk_tier']);
         Mail::assertSent(CreditReviewWaiting::class, 2);
-        foreach ([$medium, $highest] as $officer) {
+        foreach ($medium as $officer) {
             Mail::assertSent(CreditReviewWaiting::class, fn (CreditReviewWaiting $mail) => $mail->hasTo($officer->email) && $mail->run->is($run));
         }
-        foreach ([$low, $compliance] as $user) {
+        foreach ([$low, $highest, $compliance] as $user) {
             Mail::assertNotSent(CreditReviewWaiting::class, fn (CreditReviewWaiting $mail) => $mail->hasTo($user->email));
         }
     }
@@ -52,7 +52,7 @@ class NotifyOfficerOfCreditReviewTest extends TestCase
         Mail::assertNothingSent();
     }
 
-    public function test_reconsidering_an_application_emails_the_officers_who_may_decide_it(): void
+    public function test_reconsidering_an_application_emails_the_officers_of_its_tier(): void
     {
         $officer = User::factory()->creditOfficer('high')->create();
         $this->actingAs(User::factory()->creditOfficer('highest')->create());
@@ -62,7 +62,7 @@ class NotifyOfficerOfCreditReviewTest extends TestCase
         $this->post("/credit/reviews/{$run->id}/reconsider", ['notes' => 'New payslips provided']);
 
         Mail::assertSent(CreditReviewWaiting::class, fn (CreditReviewWaiting $mail) => $mail->hasTo($officer->email));
-        Mail::assertSent(CreditReviewWaiting::class, 2);
+        Mail::assertSent(CreditReviewWaiting::class, 1);
     }
 
     public function test_the_email_names_the_customer_and_tier_and_links_to_the_application_without_their_finances(): void

@@ -21,7 +21,7 @@ use App\Workflows\StateMachineWorkflow;
  * The run's result keeps the scores, the engine's decision and reasons, when it was last
  * referred, and every credit officer's decision or reconsideration, so the outcome doesn't
  * erase what led to it. Automatic steps are audited with no user; an officer's name theirs.
- * Every credit officer who may decide a referred or reconsidered application is emailed.
+ * The credit officers of a referred or reconsidered application's tier are emailed.
  */
 class FinancialScoring extends StateMachineWorkflow
 {
@@ -169,7 +169,7 @@ class FinancialScoring extends StateMachineWorkflow
     }
 
     /**
-     * Email each credit officer who may decide the application's tier that it's waiting, once the
+     * Email each credit officer of the application's tier that it's waiting, once the
      * run is saved, so the email can't arrive before the application is open for review.
      */
     private function notifyCreditOfficers(WorkflowInstance $run): void

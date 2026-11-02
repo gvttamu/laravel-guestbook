@@ -13,7 +13,7 @@ It's in the **{{ $tier }}** credit risk tier.
 Review the application
 </x-mail::button>
 
-You're receiving this because you're a credit officer who can decide {{ $tier }}-risk applications. The first officer to open it takes it on. The customer's finances and scores are only shown in the app.
+You're receiving this because you're a credit officer for {{ $tier }}-risk applications. The first officer to open it takes it on. The customer's finances and scores are only shown in the app.
 
 Thanks,<br>
 {{ config('app.name') }}

@@ -38,6 +38,35 @@ class CreditReviewTest extends TestCase
             );
     }
 
+    public function test_lists_the_latest_decided_applications_most_recent_first_with_who_decided_them(): void
+    {
+        $officer = User::factory()->creditOfficer()->create(['name' => 'Carla Credit']);
+        $this->actingAs($officer);
+        $this->travelTo('2026-11-01 09:00:00');
+        $byEngine = $this->scoringRun($this->customer(['first_name' => 'Ada']), 'approved', ['credit_risk_tier' => 'low']);
+        $this->travelTo('2026-11-02 09:00:00');
+        $byOfficer = $this->scoringRun($this->customer(['first_name' => 'Grace']), 'rejected', [
+            'credit_risk_tier' => 'high',
+            'reviews' => [['action' => 'rejected', 'notes' => 'Missed payments', 'reviewed_by' => $officer->id, 'reviewed_at' => '2026-11-02T09:00:00+00:00']],
+        ]);
+        $replaced = $this->customer();
+        $this->scoringRun($replaced, 'approved');
+        $this->scoringRun($replaced, 'pending');
+        $this->referredRun();
+
+        $this->get('/credit/reviews')->assertInertia(fn (Assert $page) => $page
+            ->has('decided', 2)
+            ->where('decided.0.id', $byOfficer->id)
+            ->where('decided.0.status', 'rejected')
+            ->where('decided.0.customer.first_name', 'Grace')
+            ->where('decided.0.credit_risk_tier', 'high')
+            ->where('decided.0.decided_by', 'Carla Credit')
+            ->where('decided.0.decided_at', '2026-11-02T09:00:00+00:00')
+            ->where('decided.1.id', $byEngine->id)
+            ->where('decided.1.decided_by', null)
+        );
+    }
+
     public function test_shows_a_referred_application_with_the_customers_finances_and_scores(): void
     {
         $this->actingAs(User::factory()->creditOfficer()->create());

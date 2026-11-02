@@ -35,18 +35,6 @@ class CreditRiskTier
     }
 
     /**
-     * The tiers whose officers may decide an application of the given tier: its own and every riskier one.
-     *
-     * @return list<string>
-     */
-    public static function atOrAbove(string $tier): array
-    {
-        $index = array_search($tier, self::TIERS, true);
-
-        return $index === false ? [] : array_slice(self::TIERS, $index);
-    }
-
-    /**
      * Points for each loan purpose; one not listed counts as 'other'.
      *
      * @var array<string, int>

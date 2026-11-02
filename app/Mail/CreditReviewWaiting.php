@@ -12,10 +12,9 @@ use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Tells a credit officer that a loan application in their credit risk tier, or a less risky
- * one, is waiting for them to decide: the decision engine referred it, or an officer reconsidered
- * it. It names the customer and the tier, and links to the application, but leaves the
- * customer's finances and scores in the app.
+ * Tells a credit officer that a loan application in their credit risk tier is waiting for them
+ * to decide: the decision engine referred it, or an officer reconsidered it. It names the customer
+ * and the tier, and links to the application, but leaves the customer's finances and scores in the app.
  */
 class CreditReviewWaiting extends Mailable
 {

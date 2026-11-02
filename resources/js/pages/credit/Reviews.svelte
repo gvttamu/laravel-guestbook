@@ -1,7 +1,12 @@
 <script>
     import { Link, page } from '@inertiajs/svelte';
 
-    let { reviews } = $props();
+    let { reviews, decided } = $props();
+
+    const outcomeStyles = {
+        approved: 'bg-green-50 text-green-700 ring-green-200',
+        rejected: 'bg-red-50 text-red-700 ring-red-200',
+    };
 
     // Officers see applications in their own credit risk tier and every less risky one.
     const tier = $derived(page.props.auth.user?.creditRiskTier);
@@ -79,6 +84,50 @@
                 {:else}
                     <tr>
                         <td colspan="7" class="px-4 py-6 text-center text-slate-500">No loan applications are waiting for review.</td>
+                    </tr>
+                {/each}
+            </tbody>
+        </table>
+    </div>
+
+    <h2 class="mt-12 text-xl font-semibold tracking-tight">Decided applications</h2>
+    <p class="mt-1 text-slate-500">The most recently decided, automatically or by an officer. Open one to reconsider it.</p>
+
+    <div class="mt-4 overflow-x-auto rounded-xl bg-white ring-1 ring-slate-200">
+        <table class="w-full text-left text-sm">
+            <thead class="border-b border-slate-200 text-slate-500">
+                <tr>
+                    <th class="px-4 py-3 font-medium">Outcome</th>
+                    <th class="px-4 py-3 font-medium">Customer</th>
+                    <th class="px-4 py-3 font-medium">Loan</th>
+                    <th class="px-4 py-3 font-medium">Credit risk</th>
+                    <th class="px-4 py-3 font-medium">Decided</th>
+                    <th class="px-4 py-3"><span class="sr-only">Actions</span></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {#each decided as application (application.id)}
+                    <tr>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <span class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 {outcomeStyles[application.status]}">{application.status}</span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <p class="font-medium">{application.customer.first_name} {application.customer.last_name}</p>
+                            <p class="text-slate-500">{application.customer.email}</p>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap tabular-nums">{formatMoney(application.loan_amount)}</td>
+                        <td class="px-4 py-3 whitespace-nowrap">{application.credit_risk_tier ?? 'unrated'}</td>
+                        <td class="px-4 py-3 text-slate-500">
+                            <time datetime={application.decided_at} class="whitespace-nowrap">{formatTimestamp(application.decided_at)}</time>
+                            <span class="block">by {application.decided_by ?? 'the decision engine'}</span>
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                            <Link href={`/credit/reviews/${application.id}`} class="font-medium text-brand hover:underline">View</Link>
+                        </td>
+                    </tr>
+                {:else}
+                    <tr>
+                        <td colspan="6" class="px-4 py-6 text-center text-slate-500">No loan applications have been decided yet.</td>
                     </tr>
                 {/each}
             </tbody>

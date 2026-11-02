@@ -4,7 +4,6 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Http\Controllers\CustomerDraftController;
-use App\Workflows\FinancialScoring\CreditRiskTier;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -56,14 +55,15 @@ class User extends Authenticatable
     }
 
     /**
-     * Credit officers who may decide an application of the given credit risk tier: those of that tier or a riskier one.
+     * Credit officers of exactly the given credit risk tier, who are emailed about its applications.
+     * Officers of riskier tiers may decide them too, but aren't told about each one.
      *
      * @param  Builder<User>  $query
      */
     #[Scope]
     protected function creditOfficersFor(Builder $query, string $tier): void
     {
-        $query->where('role', self::ROLE_CREDIT)->whereIn('credit_risk_tier', CreditRiskTier::atOrAbove($tier));
+        $query->where('role', self::ROLE_CREDIT)->where('credit_risk_tier', $tier);
     }
 
     /**
