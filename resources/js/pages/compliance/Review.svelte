@@ -1,6 +1,7 @@
 <script>
     import { Link, useForm } from '@inertiajs/svelte';
     import { untrack } from 'svelte';
+    import ReviewDecisions from '../../components/ReviewDecisions.svelte';
     import { customerSections } from '../../customerFields.js';
 
     let { review } = $props();
@@ -10,19 +11,6 @@
 
     // A sanctions review doesn't need the customer's finances or loan application, so the server doesn't send them.
     const fields = customerSections.filter((section) => !['financials', 'loan'].includes(section.key)).flatMap((section) => section.fields);
-
-    // Server-rendered timestamps are shown in UTC, then switch to the visitor's locale and time zone once mounted.
-    let mounted = $state(false);
-
-    $effect(() => {
-        mounted = true;
-    });
-
-    function formatTimestamp(timestamp) {
-        const date = new Date(timestamp);
-
-        return mounted ? date.toLocaleString() : date.toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
-    }
 
     function submit(event) {
         event.preventDefault();
@@ -44,39 +32,7 @@
     </section>
 
     {#if review.earlier_reviews.length > 0}
-        <section class="mt-6 rounded-xl bg-white p-5 ring-1 ring-slate-200">
-            <h2 class="font-semibold">Earlier in this check</h2>
-            <ol class="mt-3 space-y-4">
-                {#each review.earlier_reviews as earlier (earlier.reviewed_at)}
-                    <li class="text-sm">
-                        <p>
-                            <span
-                                class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 {earlier.decision === 'approved'
-                                    ? 'bg-green-50 text-green-700 ring-green-200'
-                                    : 'bg-red-50 text-red-700 ring-red-200'}"
-                            >
-                                {earlier.decision}
-                            </span>
-                            <span class="ml-1 font-medium">{earlier.step} match</span>
-                            <span class="text-slate-500">
-                                · {earlier.reviewed_by ?? 'an unknown reviewer'},
-                                <time datetime={earlier.reviewed_at}>{formatTimestamp(earlier.reviewed_at)}</time>
-                            </span>
-                        </p>
-                        {#if earlier.matches.length > 0}
-                            <ul class="mt-1 list-disc pl-5 text-slate-600">
-                                {#each earlier.matches as match (match)}
-                                    <li>{match}</li>
-                                {/each}
-                            </ul>
-                        {/if}
-                        {#if earlier.notes}
-                            <p class="mt-1 border-l-2 border-slate-200 pl-3 text-slate-600">{earlier.notes}</p>
-                        {/if}
-                    </li>
-                {/each}
-            </ol>
-        </section>
+        <ReviewDecisions title="Earlier in this check" reviews={review.earlier_reviews} />
     {/if}
 
     <section class="mt-6 rounded-xl bg-white p-5 ring-1 ring-slate-200">

@@ -30,12 +30,29 @@ class ComplianceReviewController extends Controller
         ]);
     }
 
-    public function show(int $run): Response
+    /**
+     * Show a run awaiting review with the form to decide it. A run that isn't awaiting review,
+     * because it has been decided, superseded, or never needed one, shows a summary instead,
+     * as officers reach it from emails that can outlive the review.
+     */
+    public function show(int $run, CustomerVerification $verification): Response
     {
-        $workflow = $this->runsAwaitingReview()->with('subject')->findOrFail($run);
+        $workflow = WorkflowInstance::where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)->with('subject')->findOrFail($run);
 
         /** @var Customer $customer */
         $customer = $workflow->subject;
+
+        if (! isset(CustomerVerification::REVIEW_PLACES[$workflow->status])) {
+            return Inertia::render('compliance/ReviewSummary', [
+                'review' => [
+                    'id' => $workflow->id,
+                    'status' => $workflow->status,
+                    'status_label' => $verification->placeLabels()[$workflow->status] ?? $workflow->status,
+                    'customer' => $customer->only(['id', 'first_name', 'last_name']),
+                    'reviews' => $this->earlierReviews($workflow),
+                ],
+            ]);
+        }
 
         return Inertia::render('compliance/Review', [
             'review' => [

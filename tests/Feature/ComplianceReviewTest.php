@@ -60,12 +60,52 @@ class ComplianceReviewTest extends TestCase
             );
     }
 
-    public function test_a_run_that_is_not_awaiting_review_is_not_found(): void
+    public function test_a_decided_review_shows_a_summary_of_the_decision_instead_of_the_form(): void
+    {
+        $officer = User::factory()->complianceOfficer()->create(['name' => 'Olive Officer']);
+        $this->actingAs($officer);
+        $run = $this->flaggedRun('contact', ['first_name' => 'Ada']);
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'rejected', 'notes' => 'Same person']);
+
+        $this->get("/compliance/reviews/{$run->id}")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('compliance/ReviewSummary')
+                ->where('review.id', $run->id)
+                ->where('review.status', 'rejected')
+                ->where('review.status_label', 'Rejected')
+                ->where('review.customer.first_name', 'Ada')
+                ->missing('review.customer.phone')
+                ->has('review.reviews', 1)
+                ->where('review.reviews.0.step', 'contact')
+                ->where('review.reviews.0.decision', 'rejected')
+                ->where('review.reviews.0.notes', 'Same person')
+                ->where('review.reviews.0.reviewed_by', 'Olive Officer')
+                ->where('review.reviews.0.matches', [self::PHONE_MATCH])
+            );
+    }
+
+    public function test_a_review_superseded_before_anyone_decided_it_shows_a_summary_with_no_decisions(): void
     {
         $this->actingAs(User::factory()->complianceOfficer()->create());
-        $verified = Customer::factory()->create()->workflows()->create(['workflow' => WorkflowInstance::CUSTOMER_VERIFICATION, 'status' => 'verified']);
+        $run = $this->flaggedRun('address');
+        $run->update(['status' => 'superseded']);
 
-        $this->get("/compliance/reviews/{$verified->id}")->assertNotFound();
+        $this->get("/compliance/reviews/{$run->id}")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('compliance/ReviewSummary')
+                ->where('review.status', 'superseded')
+                ->where('review.reviews', [])
+            );
+    }
+
+    public function test_an_unknown_run_or_a_run_of_another_workflow_is_not_found(): void
+    {
+        $this->actingAs(User::factory()->complianceOfficer()->create());
+        $scoring = Customer::factory()->create()->workflows()->create(['workflow' => WorkflowInstance::FINANCIAL_SCORING, 'status' => 'scored']);
+
+        $this->get("/compliance/reviews/{$scoring->id}")->assertNotFound();
         $this->get('/compliance/reviews/999')->assertNotFound();
     }
 
