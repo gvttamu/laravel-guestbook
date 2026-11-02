@@ -27,6 +27,9 @@
             {#if user?.isComplianceOfficer}
                 <Link href="/compliance/reviews" class={navLinkClass('/compliance')}>Compliance reviews</Link>
             {/if}
+            {#if user?.isCreditOfficer}
+                <Link href="/credit/reviews" class={navLinkClass('/credit')}>Credit reviews</Link>
+            {/if}
         </div>
 
         {#if user}
@@ -35,6 +38,9 @@
                     {user.name}
                     {#if user.isComplianceOfficer}
                         <span class="ml-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200">Compliance</span>
+                    {/if}
+                    {#if user.isCreditOfficer}
+                        <span class="ml-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-200">Credit{user.creditRiskTier ? ` · ${user.creditRiskTier} risk` : ''}</span>
                     {/if}
                 </span>
                 <Link href="/logout" method="post" as="button" class="font-medium text-slate-600 hover:text-slate-900">Sign out</Link>

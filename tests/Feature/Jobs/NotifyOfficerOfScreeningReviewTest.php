@@ -54,6 +54,16 @@ class NotifyOfficerOfScreeningReviewTest extends TestCase
         $mail->assertDontSeeInHtml('555 010 0666');
     }
 
+    public function test_the_email_to_an_assigned_officer_says_who_assigned_the_review(): void
+    {
+        $run = $this->verificationRun([], 'contact_review');
+
+        $mail = new ScreeningReviewWaiting($run, User::factory()->make(['name' => 'Olive Officer']));
+
+        $mail->assertSeeInHtml('A screening review has been assigned to you');
+        $mail->assertSeeInHtml('Olive Officer assigned this review to you');
+    }
+
     public function test_no_email_is_sent_once_the_run_has_moved_on_from_the_step(): void
     {
         $officer = User::factory()->complianceOfficer()->create();

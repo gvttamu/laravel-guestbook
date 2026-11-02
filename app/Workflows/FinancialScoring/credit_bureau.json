@@ -1,0 +1,14 @@
+{
+  "bureau": "Demo credit bureau",
+  "scores": {
+    "sam.shadow@example.com": 760,
+    "petra.phone@example.com": 760,
+    "blocked@example.com": 760,
+    "hannah.high@example.com": 780,
+    "morgan.medium@example.com": 720,
+    "lee.low@example.com": 650,
+    "rita.risky@example.com": 540,
+    "fiona.fair@example.com": 640,
+    "lars.large@example.com": 650
+  }
+}

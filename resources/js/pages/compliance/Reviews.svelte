@@ -30,6 +30,7 @@
                     <th class="px-4 py-3 font-medium">Flagged at</th>
                     <th class="px-4 py-3 font-medium">Match</th>
                     <th class="px-4 py-3 font-medium">Waiting since</th>
+                    <th class="px-4 py-3 font-medium">Assigned to</th>
                     <th class="px-4 py-3"><span class="sr-only">Actions</span></th>
                 </tr>
             </thead>
@@ -48,13 +49,14 @@
                         <td class="px-4 py-3 whitespace-nowrap text-slate-500">
                             <time datetime={review.flagged_at}>{formatTimestamp(review.flagged_at)}</time>
                         </td>
+                        <td class="px-4 py-3 {review.assignee ? '' : 'text-slate-400'}">{review.assignee?.name ?? 'Unassigned'}</td>
                         <td class="px-4 py-3 text-right">
                             <Link href={`/compliance/reviews/${review.id}`} class="font-medium text-brand hover:underline">Review</Link>
                         </td>
                     </tr>
                 {:else}
                     <tr>
-                        <td colspan="5" class="px-4 py-6 text-center text-slate-500">
+                        <td colspan="6" class="px-4 py-6 text-center text-slate-500">
                             No customers are waiting for review.
                         </td>
                     </tr>

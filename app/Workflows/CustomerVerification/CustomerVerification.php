@@ -152,6 +152,8 @@ class CustomerVerification extends StateMachineWorkflow
                 'reviewed_at' => now()->toIso8601String(),
             ],
         ]];
+        // A review that follows (the address, after an approved contact match) starts unassigned, like any new review.
+        $run->assigned_to_id = null;
 
         $run->subject->auditLogs()->create([
             'user_id' => $reviewer->id,

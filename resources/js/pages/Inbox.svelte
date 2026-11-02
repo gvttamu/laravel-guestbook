@@ -16,6 +16,7 @@
 
     const types = {
         sanctions_review: { label: 'Sanctions review', style: 'bg-red-50 text-red-700 ring-red-200', action: 'Review' },
+        credit_review: { label: 'Loan application', style: 'bg-violet-50 text-violet-700 ring-violet-200', action: 'Review' },
         new_customer: { label: 'New customer draft', style: 'bg-slate-50 text-slate-700 ring-slate-200', action: 'Continue' },
         customer_changes: { label: 'Unsaved changes', style: 'bg-blue-50 text-blue-700 ring-blue-200', action: 'Continue' },
     };
@@ -25,6 +26,8 @@
 
         return index === -1 ? key : `step ${index + 1}, ${customerSections[index].title}`;
     }
+
+    const formatMoney = (amount) => (amount === null ? '—' : Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
     const customerName = (customer) => [customer.first_name, customer.last_name].filter(Boolean).join(' ') || 'Unnamed customer';
 
@@ -75,6 +78,11 @@
                             <span class="text-red-700">{item.matches[0] ?? '—'}</span>
                             {#if item.matches.length > 1}(+{item.matches.length - 1} more){/if}
                         </p>
+                    {:else if item.type === 'credit_review'}
+                        <p class="text-slate-500">
+                            {item.credit_risk_tier ?? 'unrated'} risk ({item.credit_risk_points ?? '—'} points) · {formatMoney(item.loan_amount)} loan · affordability {item.score ?? '—'} · credit score {item.credit_score ?? 'none'}
+                        </p>
+                        <p class="text-violet-700">{item.reasons.join('; ') || 'Reconsidered by a credit officer'}</p>
                     {:else}
                         <p class="text-slate-500">
                             {item.type === 'new_customer' ? 'Not submitted yet' : 'Not saved yet'}, last on {stepName(item.step)}
@@ -85,7 +93,7 @@
                     {/if}
                 </div>
 
-                <time datetime={item.since} class="shrink-0 whitespace-nowrap text-slate-500" title={item.type === 'sanctions_review' ? 'Waiting since' : 'Last saved'}>
+                <time datetime={item.since} class="shrink-0 whitespace-nowrap text-slate-500" title={['sanctions_review', 'credit_review'].includes(item.type) ? 'Waiting since' : 'Last saved'}>
                     {formatTimestamp(item.since)}
                 </time>
 

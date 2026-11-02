@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ListsComplianceReviews;
+use App\Http\Controllers\Concerns\ListsCreditReviews;
 use App\Models\FormDraft;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -11,21 +13,28 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Everything waiting on the signed-in user, oldest first: open sanctions reviews for
- * compliance officers, and unfinished customer drafts for users who capture customers.
+ * Everything waiting on the signed-in user, oldest first (loan applications riskiest first): open sanctions reviews for
+ * compliance officers, referred loan applications for credit officers, and unfinished
+ * customer drafts for users who capture customers.
  */
 class InboxController extends Controller
 {
-    use ListsComplianceReviews;
+    use ListsComplianceReviews, ListsCreditReviews;
 
     public function index(Request $request): Response
     {
-        $reviews = $request->user()->can('review-compliance') ? $this->openReviews() : collect();
+        $reviews = $request->user()->can('review-compliance') ? $this->openReviews($request->user()) : collect();
+        $creditReviews = $request->user()->can('review-credit') ? $this->creditReviewItems($request->user()) : collect();
         $drafts = $request->user()->can('capture-customers') ? $this->draftItems($request) : collect();
 
         $items = $this->reviewItems($reviews)
+            ->concat($creditReviews)
             ->concat($drafts)
-            ->sortBy(fn (array $item): int => Carbon::parse($item['since'])->getTimestamp())
+            // Riskier loan applications come first; everything else has no points and is ordered by age alone.
+            ->sortBy([
+                fn (array $a, array $b): int => ($b['credit_risk_points'] ?? 0) <=> ($a['credit_risk_points'] ?? 0),
+                fn (array $a, array $b): int => Carbon::parse($a['since'])->getTimestamp() <=> Carbon::parse($b['since'])->getTimestamp(),
+            ])
             ->values();
 
         return Inertia::render('Inbox', [
@@ -49,6 +58,29 @@ class InboxController extends Controller
             'matches' => $review['matches'],
             'since' => $review['flagged_at'],
             'url' => route('compliance.reviews.show', $review['id']),
+        ]);
+    }
+
+    /**
+     * The loan applications waiting for a credit officer in this one's credit risk tier or a less risky one that are
+     * unassigned or assigned to them.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function creditReviewItems(User $officer): Collection
+    {
+        return $this->openCreditReviews($officer)->map(fn (array $review): array => [
+            'key' => "credit-review-{$review['id']}",
+            'type' => 'credit_review',
+            'customer' => $review['customer'],
+            'loan_amount' => $review['loan_amount'],
+            'score' => $review['score'],
+            'credit_score' => $review['credit_score'],
+            'credit_risk_tier' => $review['credit_risk_tier'],
+            'credit_risk_points' => $review['credit_risk_points'],
+            'reasons' => $review['engine_reasons'],
+            'since' => $review['referred_at'],
+            'url' => route('credit.reviews.show', $review['id']),
         ]);
     }
 

@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Customer;
+use App\Models\User;
 use App\Models\WorkflowInstance;
 use App\Workflows\CustomerVerification\CustomerVerification;
 use Illuminate\Bus\Queueable;
@@ -15,7 +16,8 @@ use Illuminate\Queue\SerializesModels;
 /**
  * Tells a compliance officer that a customer's sanctions screening found a possible match
  * for them to review. It names the customer and the check, and links to the review, but
- * leaves the matched details (phone numbers, addresses) in the app.
+ * leaves the matched details (phone numbers, addresses) in the app. When an officer assigned
+ * the review to them, it says so.
  */
 class ScreeningReviewWaiting extends Mailable
 {
@@ -24,7 +26,7 @@ class ScreeningReviewWaiting extends Mailable
     /**
      * Create a new message instance.
      */
-    public function __construct(public WorkflowInstance $run) {}
+    public function __construct(public WorkflowInstance $run, public ?User $assignedBy = null) {}
 
     /**
      * Get the message envelope.
@@ -47,6 +49,7 @@ class ScreeningReviewWaiting extends Mailable
                 'customerName' => $this->customerName(),
                 'step' => CustomerVerification::REVIEW_PLACES[$this->run->status],
                 'reviewUrl' => route('compliance.reviews.show', $this->run),
+                'assignerName' => $this->assignedBy?->name,
             ],
         );
     }

@@ -27,7 +27,7 @@ class DumpWorkflowTest extends TestCase
 
         $this->artisan('workflows:dump', ['workflow' => 'financial-scoring', '--output' => $path])->assertSuccessful();
 
-        $this->assertStringContainsString('[label="Score affordability" style="solid"]', File::get($path));
+        $this->assertStringContainsString('[label="Score affordability and credit" style="solid"]', File::get($path));
         File::delete($path);
     }
 

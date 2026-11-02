@@ -31,10 +31,12 @@ class WorkflowDiagramTest extends TestCase
                 ->where('run', null)
                 ->where('diagram', fn (string $diagram): bool => str_starts_with($diagram, 'graph LR')
                     && str_contains($diagram, 'place0(["Waiting to be scored"])')
-                    && str_contains($diagram, 'place0-->|"Score affordability"|place1')
-                    && str_contains($diagram, 'place0-->|"Financials changed"|place2')
+                    && str_contains($diagram, 'place0-->|"Score affordability and credit"|place1')
+                    && str_contains($diagram, 'place1-->|"Refer to a credit officer"|place2')
+                    && str_contains($diagram, 'place3-->|"Credit officer reconsiders"|place2')
+                    && str_contains($diagram, 'place0-->|"Financials changed"|place5')
                     && ! str_contains($diagram, 'style place'))
-                ->where('places', ['pending', 'scored', 'superseded'])
+                ->where('places', ['pending', 'scored', 'credit_review', 'approved', 'rejected', 'superseded'])
             );
     }
 
@@ -42,7 +44,18 @@ class WorkflowDiagramTest extends TestCase
     {
         $this->actingAs(User::factory()->create());
         $this->travelTo('2026-10-30 09:00:00');
-        $customer = Customer::factory()->create(['first_name' => 'Ada']);
+        // Affordable, but unknown to the demo credit bureau, so the decision engine refers the application.
+        $customer = Customer::factory()->create([
+            'first_name' => 'Ada',
+            'email' => 'ada@example.com',
+            'monthly_income' => 6000,
+            'rent_or_mortgage' => 1200,
+            'car_payments' => null,
+            'other_debt_payments' => null,
+            'living_expenses' => 1500,
+            'loan_amount' => 10000,
+            'loan_term_months' => 60,
+        ]);
         $run = $customer->workflows()->create(['workflow' => WorkflowInstance::FINANCIAL_SCORING, 'status' => 'pending']);
         $this->travelTo('2026-10-30 09:00:05');
         ScoreCustomerFinancials::dispatch($run);
@@ -50,11 +63,12 @@ class WorkflowDiagramTest extends TestCase
         $this->get("/workflows/financial-scoring?run={$run->id}")
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
-                ->where('run.status', 'scored')
+                ->where('run.status', 'credit_review')
                 ->where('run.customer.first_name', 'Ada')
                 ->where('run.history', [
                     ['place' => 'pending', 'label' => 'Waiting to be scored', 'at' => '2026-10-30T09:00:00+00:00', 'transition' => null, 'by' => null, 'reconstructed' => false],
-                    ['place' => 'scored', 'label' => 'Scored', 'at' => '2026-10-30T09:00:05+00:00', 'transition' => 'Score affordability', 'by' => null, 'reconstructed' => false],
+                    ['place' => 'scored', 'label' => 'Scored', 'at' => '2026-10-30T09:00:05+00:00', 'transition' => 'Score affordability and credit', 'by' => null, 'reconstructed' => false],
+                    ['place' => 'credit_review', 'label' => 'Referred: awaiting credit review', 'at' => '2026-10-30T09:00:05+00:00', 'transition' => 'Refer to a credit officer', 'by' => null, 'reconstructed' => false],
                 ])
             );
     }

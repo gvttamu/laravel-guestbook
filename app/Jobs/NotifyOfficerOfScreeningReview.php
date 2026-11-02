@@ -29,10 +29,11 @@ class NotifyOfficerOfScreeningReview implements ShouldQueue
     /**
      * Create a new job instance for the review of the given step. There's one job per officer,
      * so a failed send is retried for that officer alone, without emailing the others twice.
+     * `$assignedBy` is the officer who assigned the review to this one, when that's why they're told.
      *
      * @param  'contact'|'address'  $step
      */
-    public function __construct(public WorkflowInstance $workflowInstance, public string $step, public User $officer)
+    public function __construct(public WorkflowInstance $workflowInstance, public string $step, public User $officer, public ?User $assignedBy = null)
     {
         $this->afterCommit();
     }
@@ -49,6 +50,6 @@ class NotifyOfficerOfScreeningReview implements ShouldQueue
             return;
         }
 
-        Mail::to($this->officer)->send(new ScreeningReviewWaiting($run));
+        Mail::to($this->officer)->send(new ScreeningReviewWaiting($run, $this->assignedBy));
     }
 }

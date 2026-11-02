@@ -4,10 +4,19 @@
     import ReviewDecisions from '../../components/ReviewDecisions.svelte';
     import { customerSections } from '../../customerFields.js';
 
-    let { review } = $props();
+    let { review, officers } = $props();
 
     // The step is sent back so the decision can't land on a step the run has moved to since this page loaded.
     const form = useForm({ step: untrack(() => review.failed_step), decision: '', notes: '' });
+
+    // Opening a review assigns it to the officer viewing it, so nothing is chosen until they pick another
+    // officer, or "Unassigned" (empty) to return it to the queue. The step is sent for the same reason as the decision's.
+    const assignment = useForm({ step: untrack(() => review.failed_step), assignee_id: null });
+
+    function assign(event) {
+        event.preventDefault();
+        assignment.transform((data) => ({ ...data, assignee_id: data.assignee_id || null })).put(`/compliance/reviews/${review.id}/assignee`, { preserveScroll: true });
+    }
 
     // A sanctions review doesn't need the customer's finances or loan application, so the server doesn't send them.
     const fields = customerSections.filter((section) => !['financials', 'loan'].includes(section.key)).flatMap((section) => section.fields);
@@ -21,6 +30,37 @@
 <main class="mx-auto max-w-2xl px-4 py-12">
     <Link href="/compliance/reviews" class="text-sm text-slate-500 hover:text-slate-700">← Compliance reviews</Link>
     <h1 class="mt-2 text-3xl font-bold tracking-tight">Review {review.customer.first_name} {review.customer.last_name}</h1>
+
+    <form class="mt-6 rounded-xl bg-white p-5 ring-1 ring-slate-200" onsubmit={assign}>
+        <label for="assignee" class="block font-semibold">Reassign</label>
+        <p class="text-sm text-slate-500">Currently {review.assignee ? `assigned to ${review.assignee.name}` : 'unassigned'}.</p>
+        <div class="mt-2 flex gap-3">
+            <select
+                id="assignee"
+                bind:value={assignment.assignee_id}
+                class="w-full rounded-lg border px-3 py-2 focus:border-brand focus:ring-2 focus:ring-brand/30 focus:outline-none {assignment.errors.assignee_id
+                    ? 'border-red-400'
+                    : 'border-slate-300'}"
+            >
+                <option value={null} disabled>Choose an officer</option>
+                <option value="">Unassigned (return it to the queue)</option>
+                {#each officers as officer (officer.id)}
+                    <option value={officer.id}>{officer.name}</option>
+                {/each}
+            </select>
+            <button
+                type="submit"
+                disabled={assignment.processing || assignment.assignee_id === null}
+                title="Assign this review to another officer and return to the inbox"
+                class="shrink-0 rounded-lg px-4 py-2 font-medium ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+                {assignment.processing ? 'Saving…' : 'Reassign'}
+            </button>
+        </div>
+        {#if assignment.errors.assignee_id}
+            <p class="mt-1 text-sm text-red-600">{assignment.errors.assignee_id}</p>
+        {/if}
+    </form>
 
     <section class="mt-6 rounded-lg bg-red-50 p-4 text-sm text-red-800 ring-1 ring-red-200">
         <h2 class="font-semibold">Flagged at the {review.failed_step} check</h2>

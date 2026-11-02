@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ComplianceReviewController;
+use App\Http\Controllers\CreditReviewController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CustomerDraftController;
 use App\Http\Controllers\GuestbookController;
@@ -37,7 +38,7 @@ Route::middleware('auth')->group(function () {
         ->whereIn('workflow', array_keys(WorkflowInstance::STATE_MACHINES))
         ->name('workflows.show');
 
-    // Compliance officers work only from the inbox and review screens, so the customer list is closed to them too.
+    // Compliance and credit officers work only from the inbox and review screens, so the customer list is closed to them too.
     Route::middleware('can:capture-customers')->group(function () {
         Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
         Route::get('/customers/create', [CustomerDraftController::class, 'create'])->name('customers.create');
@@ -58,5 +59,21 @@ Route::middleware('auth')->group(function () {
         Route::post('/compliance/reviews/{run}', [ComplianceReviewController::class, 'decide'])
             ->whereNumber('run')
             ->name('compliance.reviews.decide');
+        Route::put('/compliance/reviews/{run}/assignee', [ComplianceReviewController::class, 'assign'])
+            ->whereNumber('run')
+            ->name('compliance.reviews.assign');
+    });
+
+    Route::middleware('can:review-credit')->group(function () {
+        Route::get('/credit/reviews', [CreditReviewController::class, 'index'])->name('credit.reviews.index');
+        Route::get('/credit/reviews/{run}', [CreditReviewController::class, 'show'])
+            ->whereNumber('run')
+            ->name('credit.reviews.show');
+        Route::post('/credit/reviews/{run}', [CreditReviewController::class, 'decide'])
+            ->whereNumber('run')
+            ->name('credit.reviews.decide');
+        Route::post('/credit/reviews/{run}/reconsider', [CreditReviewController::class, 'reconsider'])
+            ->whereNumber('run')
+            ->name('credit.reviews.reconsider');
     });
 });

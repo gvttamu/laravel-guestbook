@@ -42,6 +42,8 @@ class HandleInertiaRequests extends Middleware
                     'name' => $request->user()->name,
                     'email' => $request->user()->email,
                     'isComplianceOfficer' => $request->user()->isComplianceOfficer(),
+                    'isCreditOfficer' => $request->user()->isCreditOfficer(),
+                    'creditRiskTier' => $request->user()->credit_risk_tier,
                     'canCaptureCustomers' => $request->user()->can('capture-customers'),
                 ],
             ],

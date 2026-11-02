@@ -52,4 +52,17 @@ class UserFactory extends Factory
             'role' => User::ROLE_COMPLIANCE,
         ]);
     }
+
+    /**
+     * Indicate that the user decides referred loan applications of the given credit risk tier.
+     *
+     * @param  'low'|'medium'|'high'|'highest'  $tier
+     */
+    public function creditOfficer(string $tier = 'low'): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => User::ROLE_CREDIT,
+            'credit_risk_tier' => $tier,
+        ]);
+    }
 }

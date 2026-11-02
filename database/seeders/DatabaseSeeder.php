@@ -12,8 +12,9 @@ class DatabaseSeeder extends Seeder
 
     /**
      * Seed the application's database: a user who captures customers, with a draft of
-     * each workflow scenario waiting in their inbox, and a compliance officer to review
-     * the flagged ones. Both sign in with the password "password".
+     * each workflow scenario waiting in their inbox, two compliance officers to review the
+     * flagged ones and reassign them to each other, and a credit officer for each credit risk
+     * tier to decide referred loan applications. All sign in with the password "password".
      */
     public function run(): void
     {
@@ -26,6 +27,17 @@ class DatabaseSeeder extends Seeder
             'name' => 'Olive Officer',
             'email' => 'officer@example.com',
         ]);
+
+        User::factory()->complianceOfficer()->create([
+            'name' => 'Oscar Overseer',
+            'email' => 'officer2@example.com',
+        ]);
+
+        // One credit officer for each credit risk tier, from the least risky up.
+        User::factory()->creditOfficer('low')->create(['name' => 'Carla Credit', 'email' => 'credit@example.com']);
+        User::factory()->creditOfficer('medium')->create(['name' => 'Mia Medium', 'email' => 'credit2@example.com']);
+        User::factory()->creditOfficer('high')->create(['name' => 'Hank High', 'email' => 'credit3@example.com']);
+        User::factory()->creditOfficer('highest')->create(['name' => 'Hilda Highest', 'email' => 'credit4@example.com']);
 
         $this->call(FormDraftSeeder::class, parameters: ['user' => $capturer]);
     }

@@ -36,6 +36,36 @@ class CreateUserTest extends TestCase
         $this->assertTrue(User::sole()->isComplianceOfficer());
     }
 
+    public function test_the_credit_option_makes_them_a_credit_officer_for_a_credit_risk_tier(): void
+    {
+        $this->artisan('user:create', ['name' => 'Mia Medium', 'email' => 'mia@example.com', '--credit' => 'medium'])
+            ->expectsQuestion(self::PASSWORD_PROMPT, 'correct-horse')
+            ->expectsOutputToContain('as a credit officer for applications up to medium credit risk.')
+            ->assertSuccessful();
+
+        $user = User::sole();
+        $this->assertTrue($user->isCreditOfficer());
+        $this->assertSame('medium', $user->credit_risk_tier);
+    }
+
+    public function test_an_unknown_credit_risk_tier_is_refused(): void
+    {
+        $this->artisan('user:create', ['name' => 'Mia Medium', 'email' => 'mia@example.com', '--credit' => 'extreme'])
+            ->expectsOutputToContain('The credit risk tier must be one of: low, medium, high, highest.')
+            ->assertFailed();
+
+        $this->assertSame(0, User::count());
+    }
+
+    public function test_a_user_cannot_be_both_a_compliance_and_a_credit_officer(): void
+    {
+        $this->artisan('user:create', ['name' => 'Carla Credit', 'email' => 'carla@example.com', '--compliance' => true, '--credit' => 'low'])
+            ->expectsOutputToContain('A user can be a compliance officer or a credit officer, not both.')
+            ->assertFailed();
+
+        $this->assertSame(0, User::count());
+    }
+
     public function test_the_password_can_be_given_as_an_option_instead_of_at_the_prompt(): void
     {
         $this->artisan('user:create', ['name' => 'Ada Lovelace', 'email' => 'ada@example.com', '--password' => 'correct-horse'])

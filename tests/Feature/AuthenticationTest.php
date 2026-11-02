@@ -110,7 +110,9 @@ class AuthenticationTest extends TestCase
         $this->get('/compliance/reviews')->assertForbidden();
         $this->get("/compliance/reviews/{$run->id}")->assertForbidden();
         $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved'])->assertForbidden();
+        $this->put("/compliance/reviews/{$run->id}/assignee", ['step' => 'contact', 'assignee_id' => auth()->id()])->assertForbidden();
         $this->assertSame('contact_review', $run->refresh()->status);
+        $this->assertNull($run->assigned_to_id);
     }
 
     public function test_compliance_officers_cannot_list_capture_or_edit_customers(): void

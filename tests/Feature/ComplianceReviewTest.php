@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\NotifyOfficerOfScreeningReview;
 use App\Jobs\RunVerificationChecks;
 use App\Models\Customer;
 use App\Models\User;
@@ -39,6 +40,22 @@ class ComplianceReviewTest extends TestCase
                 ->where('reviews.1.id', $address->id)
                 ->where('reviews.1.failed_step', 'address')
             );
+    }
+
+    public function test_the_list_leaves_out_reviews_assigned_to_other_officers(): void
+    {
+        $officer = User::factory()->complianceOfficer()->create();
+        $this->actingAs($officer);
+        $mine = $this->flaggedRun('contact', flaggedAt: '2026-10-28T09:00:00+00:00');
+        $mine->assignedTo()->associate($officer)->save();
+        $unassigned = $this->flaggedRun('address', flaggedAt: '2026-10-29T09:00:00+00:00');
+        $this->flaggedRun('contact')->assignedTo()->associate(User::factory()->complianceOfficer()->create())->save();
+
+        $this->get('/compliance/reviews')->assertInertia(fn (Assert $page) => $page
+            ->has('reviews', 2)
+            ->where('reviews.0.id', $mine->id)
+            ->where('reviews.1.id', $unassigned->id)
+        );
     }
 
     public function test_shows_a_review_with_the_customers_details_but_not_their_finances(): void
@@ -83,6 +100,92 @@ class ComplianceReviewTest extends TestCase
                 ->where('review.reviews.0.reviewed_by', 'Olive Officer')
                 ->where('review.reviews.0.matches', [self::PHONE_MATCH])
             );
+    }
+
+    public function test_a_review_assigned_to_another_officer_shows_a_summary_naming_them_instead_of_the_form(): void
+    {
+        $this->actingAs(User::factory()->complianceOfficer()->create());
+        $run = $this->flaggedRun('contact', ['first_name' => 'Ada']);
+        $run->assignedTo()->associate(User::factory()->complianceOfficer()->create(['name' => 'Oscar Overseer']))->save();
+
+        $this->get("/compliance/reviews/{$run->id}")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('compliance/ReviewSummary')
+                ->where('review.assigned_to', 'Oscar Overseer')
+                ->where('review.status', 'contact_review')
+                ->where('review.customer.first_name', 'Ada')
+                ->missing('review.customer.phone')
+            );
+    }
+
+    public function test_opening_an_unassigned_review_assigns_it_to_the_officer_so_others_see_a_summary(): void
+    {
+        $olive = User::factory()->complianceOfficer()->create(['name' => 'Olive Officer']);
+        $oscar = User::factory()->complianceOfficer()->create();
+        $run = $this->flaggedRun('contact');
+
+        $this->actingAs($olive)->get("/compliance/reviews/{$run->id}")->assertInertia(fn (Assert $page) => $page
+            ->component('compliance/Review')
+            ->where('review.assignee', ['id' => $olive->id, 'name' => 'Olive Officer'])
+        );
+
+        $this->assertTrue($run->refresh()->assignedTo->is($olive));
+        $audit = $run->subject->auditLogs()->sole();
+        $this->assertSame('assigned', $audit->event);
+        $this->assertTrue($audit->user->is($olive));
+        $this->assertSame(['review_assignee' => 'Olive Officer'], $audit->new_values);
+
+        $this->actingAs($oscar)->get("/compliance/reviews/{$run->id}")->assertInertia(fn (Assert $page) => $page
+            ->component('compliance/ReviewSummary')
+            ->where('review.assigned_to', 'Olive Officer')
+        );
+        $this->get('/compliance/reviews')->assertInertia(fn (Assert $page) => $page->has('reviews', 0));
+    }
+
+    public function test_opening_a_completed_review_assigns_it_to_nobody(): void
+    {
+        $this->actingAs(User::factory()->complianceOfficer()->create());
+        $run = $this->flaggedRun('contact');
+        $run->update(['status' => 'rejected']);
+
+        $this->get("/compliance/reviews/{$run->id}")->assertInertia(fn (Assert $page) => $page->component('compliance/ReviewSummary'));
+
+        $this->assertNull($run->refresh()->assigned_to_id);
+        $this->assertSame(0, $run->subject->auditLogs()->count());
+    }
+
+    public function test_a_review_assigned_to_the_officer_viewing_it_shows_the_form(): void
+    {
+        $officer = User::factory()->complianceOfficer()->create();
+        $this->actingAs($officer);
+        $run = $this->flaggedRun('contact');
+        $run->assignedTo()->associate($officer)->save();
+
+        $this->get("/compliance/reviews/{$run->id}")->assertInertia(fn (Assert $page) => $page->component('compliance/Review'));
+    }
+
+    public function test_a_review_assigned_to_another_officer_cannot_be_decided_or_reassigned(): void
+    {
+        Queue::fake([NotifyOfficerOfScreeningReview::class]);
+        $this->actingAs(User::factory()->complianceOfficer()->create());
+        $oscar = User::factory()->complianceOfficer()->create(['name' => 'Oscar Overseer']);
+        $run = $this->flaggedRun('contact');
+        $run->assignedTo()->associate($oscar)->save();
+
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved'])
+            ->assertRedirect('/compliance/reviews')
+            ->assertInertiaFlash('error', 'This review is assigned to Oscar Overseer, so your decision wasn’t recorded.');
+
+        $this->put("/compliance/reviews/{$run->id}/assignee", ['step' => 'contact', 'assignee_id' => null])
+            ->assertRedirect('/compliance/reviews')
+            ->assertInertiaFlash('error', 'This review is assigned to Oscar Overseer, so it wasn’t reassigned.');
+
+        $run->refresh();
+        $this->assertSame('contact_review', $run->status);
+        $this->assertTrue($run->assignedTo->is($oscar));
+        $this->assertSame(0, $run->subject->auditLogs()->count());
+        Queue::assertNothingPushed();
     }
 
     public function test_a_review_superseded_before_anyone_decided_it_shows_a_summary_with_no_decisions(): void
@@ -220,6 +323,105 @@ class ComplianceReviewTest extends TestCase
 
         $this->assertSame('rejected', $run->refresh()->status);
         $this->assertSame(0, $run->subject->auditLogs()->count());
+    }
+
+    public function test_an_officer_can_reassign_a_review_to_another_officer_who_is_emailed_and_returns_to_the_inbox(): void
+    {
+        Queue::fake([NotifyOfficerOfScreeningReview::class]);
+        $olive = User::factory()->complianceOfficer()->create(['name' => 'Olive Officer']);
+        $owen = User::factory()->complianceOfficer()->create(['name' => 'Owen Officer']);
+        $this->actingAs($olive);
+        $run = $this->flaggedRun('contact');
+        $run->assignedTo()->associate($olive)->save();
+
+        $this->from("/compliance/reviews/{$run->id}")
+            ->put("/compliance/reviews/{$run->id}/assignee", ['step' => 'contact', 'assignee_id' => $owen->id])
+            ->assertRedirect('/inbox')
+            ->assertSessionHasNoErrors();
+
+        $this->assertTrue($run->refresh()->assignedTo->is($owen));
+        Queue::assertPushed(NotifyOfficerOfScreeningReview::class, fn (NotifyOfficerOfScreeningReview $job) => $job->officer->is($owen) && $job->assignedBy->is($olive) && $job->step === 'contact');
+
+        $audit = $run->subject->auditLogs()->sole();
+        $this->assertSame('assigned', $audit->event);
+        $this->assertTrue($audit->user->is($olive));
+        $this->assertSame(['review_assignee' => 'Olive Officer'], $audit->old_values);
+        $this->assertSame(['review_assignee' => 'Owen Officer'], $audit->new_values);
+
+        $this->get('/compliance/reviews')->assertInertia(fn (Assert $page) => $page->has('reviews', 0));
+        $this->actingAs($owen)->get('/compliance/reviews')->assertInertia(fn (Assert $page) => $page->where('reviews.0.assignee', ['id' => $owen->id, 'name' => 'Owen Officer']));
+        $this->get("/compliance/reviews/{$run->id}")->assertInertia(fn (Assert $page) => $page
+            ->component('compliance/Review')
+            ->where('review.assignee.name', 'Owen Officer')
+            ->where('officers', [['id' => $olive->id, 'name' => 'Olive Officer']])
+        );
+    }
+
+    public function test_an_officer_cannot_assign_a_review_to_themselves(): void
+    {
+        $officer = User::factory()->complianceOfficer()->create();
+        $this->actingAs($officer);
+        $run = $this->flaggedRun('address');
+
+        $this->put("/compliance/reviews/{$run->id}/assignee", ['step' => 'address', 'assignee_id' => $officer->id])
+            ->assertSessionHasErrors(['assignee_id' => 'Choose another compliance officer.']);
+
+        $this->assertNull($run->refresh()->assigned_to_id);
+    }
+
+    public function test_unassigning_a_review_emails_nobody_and_returns_to_the_inbox(): void
+    {
+        Queue::fake([NotifyOfficerOfScreeningReview::class]);
+        $officer = User::factory()->complianceOfficer()->create();
+        $this->actingAs($officer);
+        $run = $this->flaggedRun('address');
+        $run->assignedTo()->associate($officer)->save();
+
+        $this->put("/compliance/reviews/{$run->id}/assignee", ['step' => 'address', 'assignee_id' => null])
+            ->assertRedirect('/inbox');
+
+        $this->assertNull($run->refresh()->assigned_to_id);
+        Queue::assertNothingPushed();
+        $this->assertSame('assigned', $run->subject->auditLogs()->sole()->event);
+    }
+
+    public function test_a_review_can_only_be_assigned_to_a_compliance_officer(): void
+    {
+        $this->actingAs(User::factory()->complianceOfficer()->create());
+        $run = $this->flaggedRun('contact');
+
+        $this->put("/compliance/reviews/{$run->id}/assignee", ['step' => 'contact', 'assignee_id' => User::factory()->create()->id])
+            ->assertSessionHasErrors(['assignee_id' => 'Choose a compliance officer.']);
+
+        $this->assertNull($run->refresh()->assigned_to_id);
+    }
+
+    public function test_a_completed_review_is_not_reassigned(): void
+    {
+        Queue::fake([NotifyOfficerOfScreeningReview::class]);
+        $this->actingAs(User::factory()->complianceOfficer()->create());
+        $run = $this->flaggedRun('contact');
+        $run->update(['status' => 'rejected']);
+
+        $this->put("/compliance/reviews/{$run->id}/assignee", ['step' => 'contact', 'assignee_id' => User::factory()->complianceOfficer()->create()->id])
+            ->assertRedirect('/compliance/reviews')
+            ->assertInertiaFlash('error', 'This review has already been completed, so it wasn’t reassigned.');
+
+        $this->assertNull($run->refresh()->assigned_to_id);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_the_address_review_after_an_approved_contact_match_starts_unassigned(): void
+    {
+        $officer = User::factory()->complianceOfficer()->create();
+        $this->actingAs($officer);
+        $run = $this->flaggedRun('contact', ['address_line1' => '666 Shadow Lane', 'postal_code' => '66666', 'country' => 'United States']);
+        $run->assignedTo()->associate($officer)->save();
+
+        $this->post("/compliance/reviews/{$run->id}", ['step' => 'contact', 'decision' => 'approved']);
+
+        $this->assertSame('address_review', $run->refresh()->status);
+        $this->assertNull($run->assigned_to_id);
     }
 
     /**

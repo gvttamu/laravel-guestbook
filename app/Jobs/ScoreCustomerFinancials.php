@@ -2,9 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Models\Customer;
 use App\Models\WorkflowInstance;
-use App\Workflows\FinancialScoring\FinancialScorecard;
 use App\Workflows\FinancialScoring\FinancialScoring;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -23,30 +21,21 @@ class ScoreCustomerFinancials implements ShouldQueue
     }
 
     /**
-     * Score the run's customer and record the result, with a "scored" audit entry that has
-     * no user, since nobody did it by hand. The run is locked while it's scored, so it can't
-     * be superseded halfway; a run that's already scored or superseded is left alone.
+     * Score the run's customer and let the decision engine approve, reject or refer the
+     * application (see FinancialScoring::score). The run is locked while it's scored, so it
+     * can't be superseded halfway; a run that's already scored or superseded is left alone.
      */
-    public function handle(FinancialScoring $scoring, FinancialScorecard $scorecard): void
+    public function handle(FinancialScoring $scoring): void
     {
-        DB::transaction(function () use ($scoring, $scorecard): void {
+        DB::transaction(function () use ($scoring): void {
             $run = WorkflowInstance::lockForUpdate()->find($this->workflowInstance->getKey());
 
-            if ($run === null || ! $scoring->stateMachine()->can($run, FinancialScoring::SCORE)) {
+            if ($run === null) {
                 return;
             }
 
-            /** @var Customer $customer */
-            $customer = $run->subject;
-
-            $run->result = $scorecard->score($customer);
-            $scoring->apply($run, FinancialScoring::SCORE);
+            $scoring->score($run);
             $run->save();
-
-            $customer->auditLogs()->create([
-                'event' => 'scored',
-                'new_values' => $run->result,
-            ]);
         });
     }
 }

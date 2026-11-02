@@ -4,7 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Http\Controllers\CustomerDraftController;
-use App\Workflows\CustomerVerification\CustomerVerification;
+use App\Workflows\FinancialScoring\CreditRiskTier;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -29,9 +29,21 @@ class User extends Authenticatable
      */
     public const ROLE_COMPLIANCE = 'compliance';
 
+    /**
+     * Users with this role decide loan applications the decision engine refers in their credit
+     * risk tier (`credit_risk_tier`), and can reconsider any decided application. Set both with
+     * `php artisan user:create --credit=<tier>`.
+     */
+    public const ROLE_CREDIT = 'credit';
+
     public function isComplianceOfficer(): bool
     {
         return $this->role === self::ROLE_COMPLIANCE;
+    }
+
+    public function isCreditOfficer(): bool
+    {
+        return $this->role === self::ROLE_CREDIT;
     }
 
     /**
@@ -44,6 +56,17 @@ class User extends Authenticatable
     }
 
     /**
+     * Credit officers who may decide an application of the given credit risk tier: those of that tier or a riskier one.
+     *
+     * @param  Builder<User>  $query
+     */
+    #[Scope]
+    protected function creditOfficersFor(Builder $query, string $tier): void
+    {
+        $query->where('role', self::ROLE_CREDIT)->whereIn('credit_risk_tier', CreditRiskTier::atOrAbove($tier));
+    }
+
+    /**
      * @return HasMany<FormDraft, $this>
      */
     public function formDrafts(): HasMany
@@ -52,20 +75,25 @@ class User extends Authenticatable
     }
 
     /**
-     * How many items the inbox holds: customers flagged for review for compliance officers,
-     * and their own customer drafts for users who capture customers.
+     * How many items the inbox holds: customers flagged for review that are unassigned or assigned
+     * to them for compliance officers, referred loan applications likewise for credit officers, and their
+     * own customer drafts for users who capture customers.
      */
     public function inboxCount(): int
     {
         $reviews = $this->can('review-compliance')
-            ? WorkflowInstance::where('workflow', WorkflowInstance::CUSTOMER_VERIFICATION)->whereIn('status', array_keys(CustomerVerification::REVIEW_PLACES))->count()
+            ? WorkflowInstance::awaitingReviewBy($this)->count()
+            : 0;
+
+        $creditReviews = $this->can('review-credit')
+            ? WorkflowInstance::awaitingCreditReviewBy($this)->count()
             : 0;
 
         $drafts = $this->can('capture-customers')
             ? $this->formDrafts()->where('form_type', CustomerDraftController::FORM_TYPE)->count()
             : 0;
 
-        return $reviews + $drafts;
+        return $reviews + $creditReviews + $drafts;
     }
 
     /**

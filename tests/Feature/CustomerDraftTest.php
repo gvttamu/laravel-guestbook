@@ -228,8 +228,9 @@ class CustomerDraftTest extends TestCase
 
         $customer = Customer::sole();
         $this->assertSame('verified', $customer->verification->status);
-        $this->assertSame('scored', $customer->scoring->status);
-        $this->assertSame(['created', 'verified', 'scored'], $customer->auditLogs()->orderBy('id')->pluck('event')->all());
+        // The demo credit bureau has no file on the customer, so the decision engine refers the application.
+        $this->assertSame('credit_review', $customer->scoring->status);
+        $this->assertSame(['created', 'verified', 'scored', 'loan_referred'], $customer->auditLogs()->orderBy('id')->pluck('event')->all());
     }
 
     public function test_submitting_an_incomplete_draft_keeps_it_and_reports_missing_fields(): void

@@ -13,6 +13,18 @@
         approved: 'bg-green-50 text-green-700 ring-green-200',
         rejected: 'bg-red-50 text-red-700 ring-red-200',
         scored: 'bg-violet-50 text-violet-700 ring-violet-200',
+        assigned: 'bg-blue-50 text-blue-700 ring-blue-200',
+        loan_approved: 'bg-green-50 text-green-700 ring-green-200',
+        loan_rejected: 'bg-red-50 text-red-700 ring-red-200',
+        loan_referred: 'bg-violet-50 text-violet-700 ring-violet-200',
+        loan_reconsidered: 'bg-amber-50 text-amber-700 ring-amber-200',
+    };
+
+    // The loan decision each scoring status records, shown under the score.
+    const loanDecisions = {
+        credit_review: 'referred to credit',
+        approved: 'loan approved',
+        rejected: 'loan rejected',
     };
 
     const riskBandStyles = {
@@ -40,6 +52,9 @@
     // Checks that ran without a person show who did them, instead of "an unknown user".
     const automaticActors = {
         scored: 'automatic financial scoring',
+        loan_approved: 'the automatic decision engine',
+        loan_rejected: 'the automatic decision engine',
+        loan_referred: 'the automatic decision engine',
         flagged: 'automatic verification',
         verified: 'automatic verification',
         approved: 'automatic verification',
@@ -135,7 +150,7 @@
                             </td>
                             <td class="px-4 py-3 whitespace-nowrap">
                                 <!-- The badge opens the scoring workflow's diagram, showing where this run is. -->
-                                {#if customer.scoring?.status === 'scored'}
+                                {#if customer.scoring?.result?.risk_band}
                                     <Link
                                         href={`/workflows/financial-scoring?run=${customer.scoring.id}`}
                                         class="rounded-full px-2 py-0.5 text-xs font-medium ring-1 hover:underline {riskBandStyles[customer.scoring.result.risk_band]}"
@@ -143,6 +158,9 @@
                                     >
                                         {customer.scoring.result.score} · {customer.scoring.result.risk_band}
                                     </Link>
+                                    {#if loanDecisions[customer.scoring.status]}
+                                        <span class="mt-1 block text-xs text-slate-500">{loanDecisions[customer.scoring.status]}</span>
+                                    {/if}
                                 {:else if customer.scoring}
                                     <Link
                                         href={`/workflows/financial-scoring?run=${customer.scoring.id}`}
