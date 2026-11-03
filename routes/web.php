@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\ComplianceReviewController;
 use App\Http\Controllers\CreditReviewController;
+use App\Http\Controllers\CustomerCaseController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CustomerDraftController;
 use App\Http\Controllers\GuestbookController;
@@ -37,6 +38,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/workflows/{workflow}', [WorkflowController::class, 'show'])
         ->whereIn('workflow', array_keys(WorkflowInstance::STATE_MACHINES))
         ->name('workflows.show');
+
+    // Officers open a customer's case from their reviews; it hides what their role doesn't need to see.
+    Route::get('/customers/{customer}/case', [CustomerCaseController::class, 'show'])->name('customers.case');
 
     // Compliance and credit officers work only from the inbox and review screens, so the customer list is closed to them too.
     Route::middleware('can:capture-customers')->group(function () {

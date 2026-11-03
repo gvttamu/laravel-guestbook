@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Rules\PhoneNumber;
 use Database\Factories\CustomerFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -119,7 +120,7 @@ class Customer extends Model
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'email' => ['required', 'email', 'max:255', Rule::unique('customers')->ignore($ignore)],
-            'phone' => ['required', 'string', 'max:30'],
+            'phone' => ['required', 'string', 'max:30', new PhoneNumber],
             'date_of_birth' => ['nullable', 'date_format:Y-m-d', 'before:today'],
             'address_line1' => ['required', 'string', 'max:255'],
             'address_line2' => ['nullable', 'string', 'max:255'],

@@ -237,6 +237,22 @@ class CustomerTest extends TestCase
         $this->assertSame(1, $customer->refresh()->version);
     }
 
+    public function test_the_phone_number_must_be_in_international_format(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $customer = Customer::factory()->create();
+
+        foreach (['555 010 0100', '+1 555', '+1 555 010 0100 0100 0100', '+1 555 010 0100 ext 2'] as $invalidPhone) {
+            $this->saveEdits($customer, ['phone' => $invalidPhone])
+                ->assertSessionHasErrors(['phone' => 'The phone must be an international number starting with + and the country code, e.g. +1 555 010 0100.']);
+        }
+
+        foreach (['+1 (555) 010-0100', '+447946000000'] as $validPhone) {
+            $this->saveEdits($customer, ['phone' => $validPhone])->assertSessionHasNoErrors();
+            $this->assertSame($validPhone, $customer->refresh()->phone);
+        }
+    }
+
     public function test_changing_details_the_check_does_not_screen_keeps_the_current_run(): void
     {
         $this->actingAs(User::factory()->create());

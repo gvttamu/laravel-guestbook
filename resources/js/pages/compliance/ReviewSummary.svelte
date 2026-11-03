@@ -14,6 +14,7 @@
 <main class="mx-auto max-w-2xl px-4 py-12">
     <Link href="/compliance/reviews" class="text-sm text-slate-500 hover:text-slate-700">← Compliance reviews</Link>
     <h1 class="mt-2 text-3xl font-bold tracking-tight">Review of {name}</h1>
+    <p class="mt-1 text-sm"><Link href={`/customers/${review.customer.id}/case`} class="font-medium text-brand hover:underline">View the full case</Link></p>
 
     <section class="mt-6 rounded-lg bg-slate-50 p-4 text-sm text-slate-700 ring-1 ring-slate-200" role="status">
         <h2 class="font-semibold text-slate-900">

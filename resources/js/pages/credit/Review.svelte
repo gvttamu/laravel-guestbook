@@ -20,6 +20,7 @@
 <main class="mx-auto max-w-2xl px-4 py-12">
     <Link href="/credit/reviews" class="text-sm text-slate-500 hover:text-slate-700">← Credit reviews</Link>
     <h1 class="mt-2 text-3xl font-bold tracking-tight">Loan application: {review.customer.first_name} {review.customer.last_name}</h1>
+    <p class="mt-1 text-sm"><Link href={`/customers/${review.customer.id}/case`} class="font-medium text-brand hover:underline">View the full case</Link></p>
     <p class="mt-1 text-slate-500">{review.customer.email} · {review.customer.phone}</p>
 
     <CreditAssessment {review} />

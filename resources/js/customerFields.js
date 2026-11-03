@@ -22,7 +22,7 @@ export const customerSections = [
             { name: 'first_name', label: 'First name', required: true, autocomplete: 'given-name' },
             { name: 'last_name', label: 'Last name', required: true, autocomplete: 'family-name' },
             { name: 'email', label: 'Email', type: 'email', required: true, autocomplete: 'email' },
-            { name: 'phone', label: 'Phone', type: 'tel', required: true, autocomplete: 'tel' },
+            { name: 'phone', label: 'Phone', type: 'tel', required: true, autocomplete: 'tel', hint: 'International format with the country code, e.g. +1 555 010 0100.' },
         ],
     },
     {

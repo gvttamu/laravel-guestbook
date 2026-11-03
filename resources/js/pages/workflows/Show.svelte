@@ -107,7 +107,7 @@
 
 <main class="mx-auto max-w-5xl px-4 py-12">
     {#if run && page.props.auth.user?.canCaptureCustomers}
-        <Link href={`/customers?customer=${run.customer.id}`} class="text-sm text-slate-500 hover:text-slate-700">← {run.customer.first_name} {run.customer.last_name}</Link>
+        <Link href={`/customers/${run.customer.id}/case`} class="text-sm text-slate-500 hover:text-slate-700">← {run.customer.first_name} {run.customer.last_name}’s case</Link>
     {/if}
 
     <h1 class="mt-2 text-3xl font-bold tracking-tight">{title}</h1>

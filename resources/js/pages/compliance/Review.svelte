@@ -30,6 +30,7 @@
 <main class="mx-auto max-w-2xl px-4 py-12">
     <Link href="/compliance/reviews" class="text-sm text-slate-500 hover:text-slate-700">← Compliance reviews</Link>
     <h1 class="mt-2 text-3xl font-bold tracking-tight">Review {review.customer.first_name} {review.customer.last_name}</h1>
+    <p class="mt-1 text-sm"><Link href={`/customers/${review.customer.id}/case`} class="font-medium text-brand hover:underline">View the full case</Link></p>
 
     <form class="mt-6 rounded-xl bg-white p-5 ring-1 ring-slate-200" onsubmit={assign}>
         <label for="assignee" class="block font-semibold">Reassign</label>
